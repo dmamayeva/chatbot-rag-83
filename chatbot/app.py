@@ -261,30 +261,33 @@ async def chat(
         memory = session["memory"]
         
         # Build context from conversation history
+        # Build context from conversation history (e.g., last N turns)
         conversation_history = memory.chat_memory.messages
         context_messages = []
-        
         for msg in conversation_history:
             if isinstance(msg, HumanMessage):
                 context_messages.append(f"Human: {msg.content}")
             elif isinstance(msg, AIMessage):
                 context_messages.append(f"Assistant: {msg.content}")
-        
-        # Create contextualized query
+
+        # Optionally limit to last N exchanges for brevity
+        max_history = 6
         if context_messages:
-            context_str = "\n".join(context_messages[-6:])  # Last 3 exchanges
-            contextualized_query = f"Conversation Context:\n{context_str}\n\nCurrent Question: {chat_request.message}"
+            chat_context = "\n".join(context_messages[-max_history:])
         else:
-            contextualized_query = chat_request.message
+            chat_context = ""
+
         
         # Get RAG response
         logger.info(f"Processing query for session {session_id}: {chat_request.message}")
         answer, meta = rag_fusion_answer(
-            contextualized_query,
-            vector_store_path,
-            embedding_model,
-            mode=chat_request.mode
-        )
+            user_query=chat_request.message,
+            local_index_path=vector_store_path,
+            embedding_model=embedding_model,
+            mode=chat_request.mode,
+            chat_context=chat_context   # <-- NEW ARG
+            )
+
         
         # Update conversation memory
         memory.chat_memory.add_user_message(chat_request.message)

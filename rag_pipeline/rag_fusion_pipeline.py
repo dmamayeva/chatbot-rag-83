@@ -75,10 +75,12 @@ def rag_fusion_answer(
     mode: str = 'generated',
     num_generated_queries: int = 3,
     top_k: int = 3,
-    params: Optional[dict] = None
+    params: Optional[dict] = None,
+    chat_context: Optional[str] = None  # <-- NEW
 ) -> Tuple[str, dict]:
     """
     mode: 'original' | 'generated'
+    chat_context: (Optional) Full conversation so far, to be given to LLM
     """
     llm = get_llm(params)
     vectorstore = load_vectorstore(local_index_path, embedding_model)
@@ -96,7 +98,25 @@ def rag_fusion_answer(
     docs = retrieve_documents(queries, retriever, reciprocal_rank_fusion, top_k)
     top_docs_content = [doc.page_content for doc in docs]
 
-    final_answer = summarize_answer(user_query, top_docs_content, llm)
+    # Use the chat context as prompt for the final answer
+    if chat_context:
+        prompt = (
+            f"{chat_context}\n\n"
+            f"Use the above conversation to answer the current question:\n"
+            f"{user_query}\n\n"
+            f"Refer to these documents:\n"
+            f"{'---'.join(top_docs_content)}"
+        )
+    else:
+        prompt = (
+            f"Answer the following question using the provided documents:\n"
+            f"{user_query}\n\n"
+            f"Documents:\n"
+            f"{'---'.join(top_docs_content)}"
+        )
+
+    # Pass this prompt to your summarize function
+    final_answer = summarize_answer(prompt, [], llm)  # docs already in prompt
 
     return final_answer, params or DEFAULT_PARAMS
 
