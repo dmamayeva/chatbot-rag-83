@@ -1,10 +1,46 @@
 from langchain_core.prompts import ChatPromptTemplate
 
-query_generation_prompt = ChatPromptTemplate.from_template(
-    """Given the prompt: '{user_query}', generate 5 questions that are better articulated.
-    Return in the form of an list.""")
+# Query generation prompt
+query_generation_prompt = ChatPromptTemplate.from_template("""
+You are a helpful assistant that generates multiple search queries based on a single input query.
+Generate {num_queries} different search queries that are related to the following input query:
 
-summary_prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are a legal assistant AI helping summarize answers based on provided legal documents.."),
-    ("user", "Original user query: {user_query}\n\nRelevant legal documents:\n{documents}\n\nBased on these, provide a clear, concise answer in Russian. If there is no relevant information, say 'I am sorry, please contact an operator'")
+Input query: {original_query}
+
+The search queries should explore different aspects and perspectives of the input query.
+
+Output the search queries, one per line.
+""")
+
+# Summary prompt with chat context support
+summary_prompt = ChatPromptTemplate.from_template("""
+You are a helpful assistant answering questions based on the provided documents and conversation history.
+
+{chat_context_section}Current question: {user_query}
+
+Relevant documents:
+{documents}
+
+Instructions:
+1. If there is previous conversation context, consider it when formulating your answer to maintain continuity.
+2. Answer the current question based on the provided documents and any relevant conversation history.
+3. If the documents don't contain relevant information, say so.
+4. Be concise but thorough in your response.
+
+Answer:
+""")
+
+# Alternative: More explicit chat context handling
+summary_prompt_with_context = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful assistant answering questions based on provided documents. Consider the conversation history when formulating your response."),
+    ("human", """
+{chat_context}
+
+Current question: {user_query}
+
+Relevant documents:
+{documents}
+
+Please answer the question based on the documents and conversation history.
+""")
 ])

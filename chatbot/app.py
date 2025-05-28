@@ -185,7 +185,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -261,41 +261,51 @@ async def chat(
         memory = session["memory"]
         
         # Build context from conversation history
-        # Build context from conversation history (e.g., last N turns)
         conversation_history = memory.chat_memory.messages
         context_messages = []
+        
+        # Format conversation history
         for msg in conversation_history:
             if isinstance(msg, HumanMessage):
                 context_messages.append(f"Human: {msg.content}")
             elif isinstance(msg, AIMessage):
                 context_messages.append(f"Assistant: {msg.content}")
-
-        # Optionally limit to last N exchanges for brevity
-        max_history = 6
+        
+        # Limit to last N exchanges for context (to avoid token limits)
+        max_history = 6  # This will include last 3 exchanges (6 messages)
         if context_messages:
-            chat_context = "\n".join(context_messages[-max_history:])
+            # Take the last N messages
+            recent_messages = context_messages[-max_history:] if len(context_messages) > max_history else context_messages
+            chat_context = "\n".join(recent_messages)
+            logger.info(f"Using {len(recent_messages)} messages for context")
         else:
             chat_context = ""
-
+            logger.info("No previous conversation history")
         
-        # Get RAG response
+        # Get RAG response with chat context
         logger.info(f"Processing query for session {session_id}: {chat_request.message}")
+        logger.info(f"Chat context length: {len(chat_context)} characters")
+        
         answer, meta = rag_fusion_answer(
             user_query=chat_request.message,
             local_index_path=vector_store_path,
             embedding_model=embedding_model,
             mode=chat_request.mode,
-            chat_context=chat_context   # <-- NEW ARG
-            )
-
+            chat_context=chat_context
+        )
         
-        # Update conversation memory
+        # Update conversation memory AFTER getting the response
         memory.chat_memory.add_user_message(chat_request.message)
         memory.chat_memory.add_ai_message(answer)
         
         # Update session stats
         session["message_count"] += 1
         session["last_accessed"] = datetime.now()
+        
+        # Add chat context info to metadata
+        meta["chat_context_used"] = len(chat_context) > 0
+        meta["chat_context_length"] = len(chat_context)
+        meta["conversation_turn"] = session["message_count"]
         
         # Prepare response
         response = ChatResponse(
@@ -312,9 +322,9 @@ async def chat(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Chat processing error: {str(e)}")
+        logger.error(f"Chat processing error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
-
+        
 @app.get("/sessions/{session_id}/history")
 async def get_conversation_history(
     session_id: str,
@@ -350,7 +360,7 @@ if __name__ == "__main__":
     
     # Run server
     uvicorn.run(
-        "main:app",  # Replace "main" with your filename
+        "main:app", 
         host=host,
         port=port,
         workers=workers,
