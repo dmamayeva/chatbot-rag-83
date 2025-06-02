@@ -1,17 +1,28 @@
 from langchain_core.prompts import ChatPromptTemplate
 
-# Query generation prompt
+# Query generation prompt — TRANSLATE TO RUSSIAN
 query_generation_prompt = ChatPromptTemplate.from_template("""
 You are a helpful assistant that generates multiple search queries based on a single input query.
-Generate {num_queries} different search queries that are related to the following input query:
+Generate 3 different search queries that are related to the following input query:
 
 Input query: {original_query}
 
 The search queries should explore different aspects and perspectives of the input query.
-If the search is in Kazakh, generate queries in Russian. Translate "ПББ" to "ОЗП" in Russian.
+If the search query is in Kazakh language, generate queries in Russian. Translate "ПББ (Педагогтің білімін бағалау)" from Kazakh to "ОЗП" in Russian.
 Generate queries to search for information in legal documents.
 Output the search queries, one per line.
 """)
+
+# query_generation_prompt = ChatPromptTemplate.from_template("""
+# You are a helpful assistant that generates multiple search queries based on a single input query.
+# Generate 3 different search queries that are related to the following input query:
+
+# Input query: {original_query}
+
+# The search queries should explore different aspects and perspectives of the input query.
+# Generate queries to search for information in legal documents.
+# Output the search queries, one per line.
+# """)
 
 # Summary prompt with chat context support
 summary_prompt = ChatPromptTemplate.from_template("""
@@ -27,6 +38,8 @@ Instructions:
 2. Answer the current question based on the provided documents and any relevant conversation history.
 3. If the documents don't contain relevant information, say so.
 4. Be concise but thorough in your response.
+5. Answer the question either in Kazakh or Russian, depending on the language of the question.
+6. Translate "ПББ (Педагогтің білімін бағалау)" from Kazakh to "ОЗП" in Russian.
 
 Answer:
 """)
