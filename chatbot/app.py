@@ -29,8 +29,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Global variables for models and storage
-embedding_model = OpenAIEmbeddings(model="text-embedding-3-large")
-vector_store_path = "./data/faiss_index"
+embedding_model = OpenAIEmbeddings(model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-large"))
+vector_store_path = os.getenv("VECTOR_STORE_PATH", "./data/faiss_index")
 
 class SessionManager:
     """Manages chat sessions and conversation memory"""
@@ -340,7 +340,7 @@ async def get_conversation_history(
         messages.append({
             "type": "human" if isinstance(msg, HumanMessage) else "ai",
             "content": msg.content,
-            "timestamp": datetime.now().isoformat()  # In production, store actual timestamps
+            "timestamp": datetime.now() # In production, store actual timestamps
         })
     
     return {
