@@ -9,7 +9,7 @@ services:
       - "traefik.http.routers.chatbot_container.rule=Host(`chat.orleu.edu.kz`)"
       - "traefik.http.routers.chatbot_container.entrypoints=websecure"
       - "traefik.http.routers.chatbot_container.tls.certresolver=myresolver"
-      - "traefik.http.services.chatbot_container.loadbalancer.server.port=80"
+      - "traefik.http.services.chatbot_container.loadbalancer.server.port=8000"
     networks:
       - traefik_traefik-net
     env_file:
@@ -25,4 +25,5 @@ services:
 networks:
   traefik_traefik-net:
     external: true
+
 

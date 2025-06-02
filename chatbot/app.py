@@ -485,17 +485,9 @@ async def serve_webpage():
 if __name__ == "__main__":
     import uvicorn
     
-    # Configuration
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 8000))
-    workers = int(os.getenv("WORKERS", 1))
-    
     # Run server
     uvicorn.run(
         "main:app",
-        host=host,
-        port=port,
-        workers=workers,
-        reload=os.getenv("RELOAD", "false").lower() == "true",
+        reload=False,
         log_level="info"
     )
