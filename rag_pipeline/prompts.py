@@ -8,7 +8,7 @@ Generate {num_queries} different search queries that are related to the followin
 Input query: {original_query}
 
 The search queries should explore different aspects and perspectives of the input query.
-If the search is in Kazakh, translate it in Russian and generate queries in Russian. Translate "ПББ" to "ОЗП" in Russian.
+If the search is in Kazakh, generate queries in Russian. Translate "ПББ" to "ОЗП" in Russian.
 Generate queries to search for information in legal documents.
 Output the search queries, one per line.
 """)

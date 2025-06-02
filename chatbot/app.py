@@ -1,9 +1,6 @@
-"""
-Production-Ready RAG Chatbot API with Session Memory
-FastAPI + LangChain + FAISS Vector Store
-"""
-
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi.responses import FileResponse
+import os
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
@@ -15,13 +12,12 @@ from datetime import datetime, timedelta
 import json
 import os
 from contextlib import asynccontextmanager
-
+from collections import deque
 # LangChain imports
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.schema import BaseMessage, HumanMessage, AIMessage
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
-
 from rag_pipeline.rag_fusion_pipeline import *
 
 # Configure logging
@@ -31,6 +27,82 @@ logger = logging.getLogger(__name__)
 # Global variables for models and storage
 embedding_model = OpenAIEmbeddings(model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-large"))
 vector_store_path = os.getenv("VECTOR_STORE_PATH", "./data/faiss_index")
+
+class RateLimiter:
+    """Rate limiter for tracking message frequency per session"""
+    
+    def __init__(self, max_requests: int = 5, time_window_minutes: int = 1):
+        self.max_requests = max_requests
+        self.time_window = timedelta(minutes=time_window_minutes)
+        self.request_history: Dict[str, deque] = {}
+    
+    def is_allowed(self, session_id: str) -> tuple[bool, Optional[float]]:
+        """
+        Check if request is allowed for session
+        Returns (is_allowed, seconds_until_reset)
+        """
+        current_time = datetime.now()
+        
+        # Initialize session if not exists
+        if session_id not in self.request_history:
+            self.request_history[session_id] = deque()
+        
+        session_requests = self.request_history[session_id]
+        
+        # Remove old requests outside time window
+        cutoff_time = current_time - self.time_window
+        while session_requests and session_requests[0] < cutoff_time:
+            session_requests.popleft()
+        
+        # Check if under limit
+        if len(session_requests) < self.max_requests:
+            session_requests.append(current_time)
+            return True, None
+        
+        # Calculate seconds until oldest request expires
+        oldest_request = session_requests[0]
+        seconds_until_reset = (oldest_request + self.time_window - current_time).total_seconds()
+        
+        return False, max(0, seconds_until_reset)
+    
+    def cleanup_expired_sessions(self, active_session_ids: set):
+        """Remove rate limit data for expired sessions"""
+        expired_sessions = set(self.request_history.keys()) - active_session_ids
+        for session_id in expired_sessions:
+            del self.request_history[session_id]
+        
+        if expired_sessions:
+            logger.info(f"Cleaned up rate limit data for {len(expired_sessions)} expired sessions")
+    
+    def get_session_stats(self, session_id: str) -> Dict:
+        """Get rate limit stats for a session"""
+        if session_id not in self.request_history:
+            return {
+                "requests_in_window": 0,
+                "requests_remaining": self.max_requests,
+                "window_reset_seconds": 0
+            }
+        
+        current_time = datetime.now()
+        session_requests = self.request_history[session_id]
+        cutoff_time = current_time - self.time_window
+        
+        # Count valid requests in current window
+        valid_requests = [req for req in session_requests if req >= cutoff_time]
+        requests_remaining = max(0, self.max_requests - len(valid_requests))
+        
+        # Calculate reset time
+        window_reset_seconds = 0
+        if valid_requests:
+            oldest_valid = min(valid_requests)
+            window_reset_seconds = (oldest_valid + self.time_window - current_time).total_seconds()
+            window_reset_seconds = max(0, window_reset_seconds)
+        
+        return {
+            "requests_in_window": len(valid_requests),
+            "requests_remaining": requests_remaining,
+            "window_reset_seconds": window_reset_seconds
+        }
 
 class SessionManager:
     """Manages chat sessions and conversation memory"""
@@ -61,7 +133,6 @@ class SessionManager:
             return None
         
         session = self.sessions[session_id]
-        
         # Check if session has expired
         if datetime.now() - session["last_accessed"] > self.session_timeout:
             self.delete_session(session_id)
@@ -78,6 +149,10 @@ class SessionManager:
             logger.info(f"Deleted session: {session_id}")
             return True
         return False
+    
+    def get_active_session_ids(self) -> set:
+        """Get set of all active session IDs"""
+        return set(self.sessions.keys())
     
     def cleanup_expired_sessions(self):
         """Remove expired sessions"""
@@ -107,14 +182,15 @@ class SessionManager:
             }
         }
 
-# Initialize session manager
+# Initialize session manager and rate limiter
 session_manager = SessionManager()
+rate_limiter = RateLimiter(max_requests=5, time_window_minutes=1)
 
 # Pydantic models for API
 class ChatMessage(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000, description="User message")
     session_id: Optional[str] = Field(None, description="Session ID for conversation continuity")
-    mode: str = Field("original", description="RAG mode: 'original' or other modes")
+    mode: str = Field("original", description="RAG mode: 'original' or generated")
 
 class ChatResponse(BaseModel):
     response: str
@@ -122,6 +198,7 @@ class ChatResponse(BaseModel):
     message_count: int
     metadata: Dict[str, Any] = {}
     timestamp: str
+    rate_limit: Dict[str, Any] = {}
 
 class SessionCreateResponse(BaseModel):
     session_id: str
@@ -136,6 +213,11 @@ class HealthResponse(BaseModel):
     timestamp: str
     version: str = "1.0.0"
 
+class RateLimitError(BaseModel):
+    detail: str
+    retry_after_seconds: float
+    rate_limit: Dict[str, Any]
+
 # Security (optional - remove if not needed)
 security = HTTPBearer(auto_error=False)
 
@@ -146,17 +228,15 @@ async def get_api_key(credentials: HTTPAuthorizationCredentials = Depends(securi
         raise HTTPException(status_code=401, detail="Invalid API key")
     return credentials
 
-
 # Startup and shutdown events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown"""
     # Startup
     logger.info("Starting RAG Chatbot API...")
-    
     # Initialize your embedding model here
     global embedding_model
-    # embedding_model = YourEmbeddingModel()  # Replace with actual initialization
+    # embedding_model = YourEmbeddingModel() # Replace with actual initialization
     
     # Start background cleanup task
     cleanup_task = asyncio.create_task(periodic_cleanup())
@@ -175,9 +255,9 @@ async def lifespan(app: FastAPI):
 # Initialize FastAPI app
 app = FastAPI(
     title="RAG Chatbot API",
-    description="Production-ready RAG chatbot with session-based conversation memory",
+    description="Production-ready RAG chatbot with session-based conversation memory and rate limiting",
     version="1.0.0",
-    docs_url="/docs",
+    docs_url="/docs", 
     redoc_url="/redoc",
     lifespan=lifespan
 )
@@ -185,7 +265,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -193,18 +273,22 @@ app.add_middleware(
 
 # Background task for cleanup
 async def periodic_cleanup():
-    """Periodically clean up expired sessions"""
+    """Periodically clean up expired sessions and rate limit data"""
     while True:
         try:
             await asyncio.sleep(300)  # Run every 5 minutes
             session_manager.cleanup_expired_sessions()
+            
+            # Cleanup rate limiter for expired sessions
+            active_sessions = session_manager.get_active_session_ids()
+            rate_limiter.cleanup_expired_sessions(active_sessions)
+            
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error(f"Cleanup task error: {str(e)}")
 
 # API Endpoints
-
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint"""
@@ -239,13 +323,30 @@ async def get_session_stats(credentials: HTTPAuthorizationCredentials = Depends(
     stats = session_manager.get_session_stats()
     return SessionStatsResponse(**stats)
 
+@app.get("/sessions/{session_id}/rate-limit")
+async def get_rate_limit_stats(
+    session_id: str,
+    credentials: HTTPAuthorizationCredentials = Depends(get_api_key)
+):
+    """Get rate limit statistics for a session"""
+    # Check if session exists
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+    
+    rate_stats = rate_limiter.get_session_stats(session_id)
+    return {
+        "session_id": session_id,
+        "rate_limit": rate_stats
+    }
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(
     chat_request: ChatMessage,
     background_tasks: BackgroundTasks,
     credentials: HTTPAuthorizationCredentials = Depends(get_api_key)
 ):
-    """Main chat endpoint with conversation memory"""
+    """Main chat endpoint with conversation memory and rate limiting"""
     try:
         # Get or create session
         if chat_request.session_id:
@@ -256,6 +357,21 @@ async def chat(
         else:
             session_id = session_manager.create_session()
             session = session_manager.get_session(session_id)
+        
+        # Check rate limit
+        is_allowed, retry_after = rate_limiter.is_allowed(session_id)
+        rate_limit_stats = rate_limiter.get_session_stats(session_id)
+        
+        if not is_allowed:
+            logger.warning(f"Rate limit exceeded for session {session_id}")
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "message": "Rate limit exceeded. You can send up to 5 messages per minute.",
+                    "retry_after_seconds": retry_after,
+                    "rate_limit": rate_limit_stats
+                }
+            )
         
         # Get conversation memory
         memory = session["memory"]
@@ -307,13 +423,17 @@ async def chat(
         meta["chat_context_length"] = len(chat_context)
         meta["conversation_turn"] = session["message_count"]
         
+        # Get updated rate limit stats after processing
+        updated_rate_limit_stats = rate_limiter.get_session_stats(session_id)
+        
         # Prepare response
         response = ChatResponse(
             response=answer,
             session_id=session_id,
             message_count=session["message_count"],
             metadata=meta,
-            timestamp=datetime.now().isoformat()
+            timestamp=datetime.now().isoformat(),
+            rate_limit=updated_rate_limit_stats
         )
         
         logger.info(f"Successfully processed query for session {session_id}")
@@ -324,7 +444,7 @@ async def chat(
     except Exception as e:
         logger.error(f"Chat processing error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
-        
+
 @app.get("/sessions/{session_id}/history")
 async def get_conversation_history(
     session_id: str,
@@ -340,14 +460,26 @@ async def get_conversation_history(
         messages.append({
             "type": "human" if isinstance(msg, HumanMessage) else "ai",
             "content": msg.content,
-            "timestamp": datetime.now() # In production, store actual timestamps
+            "timestamp": datetime.now()  # In production, store actual timestamps
         })
+    
+    # Include rate limit info
+    rate_limit_stats = rate_limiter.get_session_stats(session_id)
     
     return {
         "session_id": session_id,
         "message_count": session["message_count"],
-        "messages": messages
+        "messages": messages,
+        "rate_limit": rate_limit_stats
     }
+
+@app.get("/", include_in_schema=False)
+async def serve_webpage():
+    """Serve the static HTML page"""
+    html_path = "/app/embed/index.html"
+    if not os.path.exists(html_path):
+        raise HTTPException(status_code=404, detail="Webpage not found")
+    return FileResponse(html_path)
 
 # Run the application
 if __name__ == "__main__":
@@ -360,7 +492,7 @@ if __name__ == "__main__":
     
     # Run server
     uvicorn.run(
-        "main:app", 
+        "main:app",
         host=host,
         port=port,
         workers=workers,
