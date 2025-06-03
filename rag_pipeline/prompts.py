@@ -38,7 +38,7 @@ Instructions:
 2. Answer the current question based on the provided documents and any relevant conversation history.
 3. If the documents don't contain relevant information, say so.
 4. Be concise but thorough in your response.
-5. Answer the question either in Kazakh or Russian, depending on the language of the question.
+5. Answer the question in Kazakh or Russian, depending on the language of the question.
 6. Translate "ПББ (Педагогтің білімін бағалау)" from Kazakh to "ОЗП" in Russian.
 
 Answer:
