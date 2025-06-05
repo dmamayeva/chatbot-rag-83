@@ -28,7 +28,9 @@ Output the search queries, one per line.
 summary_prompt = ChatPromptTemplate.from_template("""
 You are a helpful assistant answering questions based on the provided documents and conversation history.
 
-{chat_context_section}Current question: {user_query}
+{chat_context_section}
+
+Current question: {user_query}
 
 Relevant documents:
 {documents}
@@ -55,6 +57,13 @@ Current question: {user_query}
 Relevant documents:
 {documents}
 
-Please answer the question based on the documents and conversation history.
+Instructions:
+1. If there is previous conversation context, consider it when formulating your answer to maintain continuity.
+2. Answer the current question based on the provided documents and any relevant conversation history.
+3. If the documents don't contain relevant information, say so.
+4. Be concise but thorough in your response.
+5. Answer the question in Kazakh or Russian, depending on the language of the question.
+6. Translate "ПББ (Педагогтің білімін бағалау)" from Kazakh to "ОЗП" in Russian.
+Answer:
 """)
 ])
