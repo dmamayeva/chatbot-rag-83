@@ -7,7 +7,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser
 from langchain.callbacks.manager import get_openai_callback
-from .prompts import query_generation_prompt, summary_prompt
+# from .prompts import query_generation_prompt, summary_prompt
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
