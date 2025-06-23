@@ -1,36 +1,35 @@
-# src/rag_chatbot/api/routes/chat.py (Updated with Analytics)
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
+# src/rag_chatbot/api/routes/chat.py
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from langchain.schema import HumanMessage, AIMessage
 from langchain_openai import OpenAIEmbeddings
 from datetime import datetime
-import time
 
 from src.rag_chatbot.models.schemas import ChatMessage, ChatResponse
 from src.rag_chatbot.api.middleware.auth import get_api_key
 from src.rag_chatbot.utils.logger import logger
 from src.rag_chatbot.config.settings import settings
-from fastapi.responses import FileResponse
-from src.rag_chatbot.core.instances import session_manager, rate_limiter, rag_pipeline
-from src.rag_chatbot.services.analytics_service import AnalyticsService
-from src.rag_chatbot.core.database import get_db
-import os
-from pathlib import Path
+from src.rag_chatbot.core.instances import session_manager, rate_limiter
+# from rag_pipeline.rag_fusion_pipeline import rag_fusion_answer
+from src.rag_chatbot.core.instances import rag_pipeline
 
 router = APIRouter()
+
+
 embedding_model = OpenAIEmbeddings(model=settings.embedding_model)
+
+from fastapi import HTTPException, BackgroundTasks, Depends
+from fastapi.responses import FileResponse
+import os
+import mimetypes
+from pathlib import Path
 
 @router.post("/", response_model=ChatResponse)
 async def chat(
     chat_request: ChatMessage,
     background_tasks: BackgroundTasks,
-    request: Request,
-    credentials = Depends(get_api_key),
-    db = Depends(get_db)
+    credentials = Depends(get_api_key)
 ):
-    """Main chat endpoint with conversation memory, rate limiting, analytics, and file serving"""
-    start_time = time.time()
-    analytics = AnalyticsService(db)
-    
+    """Main chat endpoint with conversation memory, rate limiting, and file serving"""
     try:
         logger.info(f"Received chat request: {chat_request.message}")
         
@@ -50,10 +49,6 @@ async def chat(
         
         if not is_allowed:
             logger.warning(f"Rate limit exceeded for session {session_id}")
-            
-            # Track rate limit event
-            analytics.track_rate_limit(session_id, retry_after)
-            
             raise HTTPException(
                 status_code=429,
                 detail={
@@ -77,9 +72,10 @@ async def chat(
             elif isinstance(msg, AIMessage):
                 context_messages.append(f"Zaure: {msg.content}")
         
-        # Limit to last N exchanges for context
-        max_history = settings.max_memory_length
+        # Limit to last N exchanges for context (to avoid token limits)
+        max_history = settings.max_memory_length # This will include last 3 exchanges (6 messages)
         if context_messages:
+            # Take the last N messages
             recent_messages = context_messages[-max_history:] if len(context_messages) > max_history else context_messages
             chat_context = "\n".join(recent_messages)
             logger.info(f"Using {len(recent_messages)} messages for context")
@@ -96,9 +92,6 @@ async def chat(
             user_query=chat_request.message
         )
         
-        # Calculate response time
-        response_time_ms = (time.time() - start_time) * 1000
-        
         # Check if decision was to retrieve document and file exists
         if (meta.get("decision") == "retrieve_document" and 
             meta.get("success") and 
@@ -108,6 +101,7 @@ async def chat(
             
             # Verify file exists and is readable
             if os.path.exists(file_path) and os.path.isfile(file_path):
+                # Check if it's a PDF file
                 file_extension = Path(file_path).suffix.lower()
                 if file_extension == '.pdf':
                     logger.info(f"Returning PDF file: {file_path}")
@@ -120,32 +114,17 @@ async def chat(
                     session["message_count"] += 1
                     session["last_accessed"] = datetime.now()
                     
-                    # Track analytics for document retrieval
-                    background_tasks.add_task(
-                        analytics.track_conversation,
-                        session_id,
-                        chat_request.message,
-                        f"Document retrieved: {meta.get('document_name', 'Unknown')}",
-                        meta,
-                        response_time_ms
-                    )
-                    
-                    # Track document download
-                    background_tasks.add_task(
-                        analytics.track_document_download,
-                        session_id,
-                        meta.get('document_name', 'Unknown'),
-                        meta.get('file_size_mb', 0)
-                    )
-                    
-                    # Safely encode metadata for headers
+                    # Safely encode metadata for headers (HTTP headers must be Latin-1)
                     def safe_encode_header(value: str) -> str:
+                        """Safely encode string for HTTP headers"""
                         if not value:
                             return "Unknown"
                         try:
+                            # Try to encode as Latin-1 first
                             value.encode('latin-1')
                             return value
                         except UnicodeEncodeError:
+                            # If it fails, encode to bytes then to base64
                             import base64
                             encoded_bytes = value.encode('utf-8')
                             return base64.b64encode(encoded_bytes).decode('ascii')
@@ -171,6 +150,7 @@ async def chat(
             else:
                 logger.warning(f"File does not exist or is not readable: {file_path}")
 
+        
         # Normal response flow (not a document retrieval or file doesn't exist)
         # Update conversation memory AFTER getting the response
         memory.chat_memory.add_user_message(chat_request.message)
@@ -184,19 +164,6 @@ async def chat(
         meta["chat_context_used"] = len(chat_context) > 0
         meta["chat_context_length"] = len(chat_context)
         meta["conversation_turn"] = session["message_count"]
-        meta["response_time_ms"] = response_time_ms
-        meta["user_agent"] = request.headers.get("user-agent")
-        meta["ip_address"] = request.client.host
-        
-        # Track analytics in background
-        background_tasks.add_task(
-            analytics.track_conversation,
-            session_id,
-            chat_request.message,
-            answer,
-            meta,
-            response_time_ms
-        )
         
         # Get updated rate limit stats after processing
         updated_rate_limit_stats = rate_limiter.get_session_stats(session_id)
@@ -210,45 +177,122 @@ async def chat(
             timestamp=datetime.now().isoformat(),
             rate_limit=updated_rate_limit_stats
         )
-        
+        # import json
+        # with open('metadata_info.json', 'w') as f:
+        #     json.dump(meta, f)
         logger.info(f"Successfully processed query for session {session_id}")
         return response
         
     except HTTPException:
-        # Track error analytics for HTTP exceptions
-        if 'session_id' in locals():
-            background_tasks.add_task(
-                analytics.track_error,
-                session_id,
-                "HTTPException",
-                str(e.detail) if hasattr(e, 'detail') else str(e)
-            )
         raise
     except Exception as e:
         logger.error(f"Chat processing error: {str(e)}", exc_info=True)
-        
-        # Track error analytics
-        if 'session_id' in locals():
-            background_tasks.add_task(
-                analytics.track_error,
-                session_id,
-                "InternalError",
-                str(e)
-            )
-        
         raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.get("/analytics/dashboard")
-async def get_analytics_dashboard(
-    hours: int = 24,
-    credentials = Depends(get_api_key),
-    db = Depends(get_db)
-):
-    """Get analytics dashboard data"""
-    try:
-        analytics = AnalyticsService(db)
-        dashboard_data = analytics.get_dashboard_data(hours=hours)
-        return dashboard_data
-    except Exception as e:
-        logger.error(f"Error fetching dashboard data: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to fetch analytics data")
+    
+# @router.post("/", response_model=ChatResponse)
+# async def chat(
+#     chat_request: ChatMessage,
+#     background_tasks: BackgroundTasks,
+#     credentials = Depends(get_api_key)
+# ):
+#     """Main chat endpoint with conversation memory and rate limiting"""
+#     try:
+#         logger.info(f"Received chat request: {chat_request.message}")
+        
+#         # Get or create session
+#         if chat_request.session_id:
+#             session = session_manager.get_session(chat_request.session_id)
+#             if not session:
+#                 raise HTTPException(status_code=404, detail="Session not found or expired")
+#             session_id = chat_request.session_id
+#         else:
+#             session_id = session_manager.create_session()
+#             session = session_manager.get_session(session_id)
+        
+#         # Check rate limit
+#         is_allowed, retry_after = rate_limiter.is_allowed(session_id)
+#         rate_limit_stats = rate_limiter.get_session_stats(session_id)
+        
+#         if not is_allowed:
+#             logger.warning(f"Rate limit exceeded for session {session_id}")
+#             raise HTTPException(
+#                 status_code=429,
+#                 detail={
+#                     "message": "Rate limit exceeded. You can send up to 5 messages per minute.",
+#                     "retry_after_seconds": retry_after,
+#                     "rate_limit": rate_limit_stats
+#                 }
+#             )
+        
+#         # Get conversation memory
+#         memory = session["memory"]
+        
+#         # Build context from conversation history
+#         conversation_history = memory.chat_memory.messages
+#         context_messages = []
+        
+#         # Format conversation history
+#         for msg in conversation_history:
+#             if isinstance(msg, HumanMessage):
+#                 context_messages.append(f"Human: {msg.content}")
+#             elif isinstance(msg, AIMessage):
+#                 context_messages.append(f"Assistant: {msg.content}")
+        
+#         # Limit to last N exchanges for context (to avoid token limits)
+#         max_history = 6  # This will include last 3 exchanges (6 messages)
+#         if context_messages:
+#             # Take the last N messages
+#             recent_messages = context_messages[-max_history:] if len(context_messages) > max_history else context_messages
+#             chat_context = "\n".join(recent_messages)
+#             logger.info(f"Using {len(recent_messages)} messages for context")
+#         else:
+#             chat_context = ""
+#             logger.info("No previous conversation history")
+        
+#         # Get RAG response with chat context
+#         logger.info(f"Processing query for session {session_id}: {chat_request.message}")
+#         logger.info(f"Chat context length: {len(chat_context)} characters")
+        
+#         # ✅ Fixed: Use proper embedding model object
+#         # answer, meta = rag_fusion_answer(
+#         #     user_query=chat_request.message,
+#         #     local_index_path=settings.vector_store_path,
+#         #     embedding_model=embedding_model,  # Use the model object, not the string
+#         #     mode=chat_request.mode,
+#         #     chat_context=chat_context
+#         # )
+#         answer, meta = rag_pipeline.get_response(user_query=chat_request.message)
+#         # Update conversation memory AFTER getting the response
+#         memory.chat_memory.add_user_message(chat_request.message)
+#         memory.chat_memory.add_ai_message(answer)
+        
+#         # Update session stats
+#         session["message_count"] += 1
+#         session["last_accessed"] = datetime.now()
+        
+#         # Add chat context info to metadata
+#         meta["chat_context_used"] = len(chat_context) > 0
+#         meta["chat_context_length"] = len(chat_context)
+#         meta["conversation_turn"] = session["message_count"]
+        
+#         # Get updated rate limit stats after processing
+#         updated_rate_limit_stats = rate_limiter.get_session_stats(session_id)
+        
+#         # Prepare response
+#         response = ChatResponse(
+#             response=answer,
+#             session_id=session_id,
+#             message_count=session["message_count"],
+#             metadata=meta,
+#             timestamp=datetime.now().isoformat(),
+#             rate_limit=updated_rate_limit_stats
+#         )
+        
+#         logger.info(f"Successfully processed query for session {session_id}")
+#         return response
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Chat processing error: {str(e)}", exc_info=True)
+#         raise HTTPException(status_code=500, detail="Internal server error")

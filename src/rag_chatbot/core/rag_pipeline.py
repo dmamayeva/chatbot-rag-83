@@ -28,3 +28,4 @@ class RAGPipeline:
     
     def get_response(self, user_query: str, chat_context: str = "", mode: str = "generated"):
         return  self.agent.process_query(user_query)
+    

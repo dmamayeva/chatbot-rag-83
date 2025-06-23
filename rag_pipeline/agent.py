@@ -57,9 +57,9 @@ class UnifiedRAGAgent:
         self.openai_embedding_model = openai_embedding_model
         self.memory_window_size = memory_window_size
         
-        # Initialize components
         self.llm = llm
-        # for embeddings: since the FAISS base is using OpenAI embeddings, it's necessary to have this one
+        # for embeddings: since the FAISS base is using OpenAI embeddings, it's necessary to have this one. 
+        # In case you want to use other embeddings—REBUILD vector index
         self.openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else OpenAI()
         
         # Initialize memory
@@ -70,7 +70,6 @@ class UnifiedRAGAgent:
         )
         self.conversation_history = []
         
-        # Load document mappings and build semantic index
         self.document_mappings = self._load_document_mappings()
         self._load_or_build_semantic_index()
         
@@ -172,9 +171,8 @@ Now analyze the user query and decide whether to retrieve a document, search the
             except Exception as e:
                 logger.error(f"Failed to load cached embeddings: {e}")
         
-        # If not cached or failed to load — build
+        # If not cached or failed to load — build and save
         self._build_semantic_index()
-        # Then save
         self._save_document_embeddings()
 
     def _load_document_mappings(self) -> Dict[str, str]:
@@ -320,7 +318,7 @@ Now analyze the user query and decide whether to retrieve a document, search the
             
             # Apply reciprocal rank fusion
             fused_docs = self._reciprocal_rank_fusion(all_docs)
-            top_docs = fused_docs[:5]  # Top 5 documents
+            top_docs = fused_docs[:3]  # Top 5 documents
             
             # Generate answer with context
             context = self._get_conversation_context()
@@ -381,7 +379,9 @@ Now analyze the user query and decide whether to retrieve a document, search the
     def _generate_answer(self, query: str, documents: List[Any], context: str) -> str:
         """Generate answer from documents with conversation context"""
         prompt = chatbot_prompt
-        doc_contents = "\n\n".join([doc.page_content for doc in documents])
+        # doc_contents = "\n\n".join([doc.page_content for doc in documents])
+        doc_contents = "\n\n".join([f"Exracted from: {doc.metadata['doc_info']}: {doc.page_content}" for doc in documents])
+        # print(doc_contents)
         
         chain = prompt | self.llm | StrOutputParser()
         return chain.invoke({
@@ -432,10 +432,8 @@ Now analyze the user query and decide whether to retrieve a document, search the
         }
         
         try:
-            # Get conversation context
             context = self._get_conversation_context()
             
-            # Make decision using LLM with function calling
             chain = self.decision_prompt | self.llm.bind(
                 functions=self.function_definitions,
                 function_call="auto"
@@ -449,7 +447,6 @@ Now analyze the user query and decide whether to retrieve a document, search the
                 metadata["decision_cost"] = cb.total_cost
                 metadata["total_cost"] += cb.total_cost
             
-            # Check if function was called
             if hasattr(response, 'additional_kwargs') and 'function_call' in response.additional_kwargs:
                 function_call = response.additional_kwargs['function_call']
                 function_name = function_call['name']
@@ -491,11 +488,9 @@ Now analyze the user query and decide whether to retrieve a document, search the
                     answer = "Unknown function called"
             
             else:
-                # Direct answer without tool usage
                 metadata["decision"] = "direct_answer"
                 answer = response.content
             
-            # Update memory
             self._update_memory(user_query, answer)
             metadata["success"] = True
             
@@ -505,6 +500,7 @@ Now analyze the user query and decide whether to retrieve a document, search the
             return answer, metadata
             
         except Exception as e:
+            print(e)
             logger.error(f"Error processing query: {str(e)}")
             error_msg = f"I encountered an error: {str(e)}"
             metadata["error"] = str(e)
