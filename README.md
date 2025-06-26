@@ -1,11 +1,12 @@
 # Запуск локально (сервис и страница)
 ```python
 uvicorn src.rag_chatbot.main:app --reload --host 0.0.0.0 --port 8000
+# если запускать streamlit-страницу
 streamlit run static/st_page.py
 ```
 # HTML-страница 
 ```python
-http://127.0.0.1:8000/chat
+http://127.0.0.1:8000/chat-ui
 ```
 # Часто задаваемые вопросы
 ## На русском язке (оригинал)

@@ -11,49 +11,49 @@ from src.rag_chatbot.services.analytics_service import AnalyticsService
 from src.rag_chatbot.utils.logger import logger
 
 class AnalyticsTaskManager:
-    """Manages background analytics tasks"""
+    """Управление фоновыми задачами аналитики"""
     
     def __init__(self):
         self.running = False
         self.scheduler_thread = None
     
     def start(self):
-        """Start the analytics task scheduler"""
+        """Запуск планировщика задач аналитики"""
         if self.running:
             return
         
         self.running = True
         
-        # Schedule periodic tasks
+        # Планирование периодических задач
         schedule.every(5).minutes.do(self._update_system_metrics)
         schedule.every(1).hours.do(self._cleanup_old_sessions)
         schedule.every(1).days.do(self._generate_daily_reports)
         schedule.every(1).weeks.do(self._cleanup_old_analytics)
         
-        # Start scheduler in background thread
+        # Запуск планировщика в фоновом потоке
         self.scheduler_thread = threading.Thread(target=self._run_scheduler, daemon=True)
         self.scheduler_thread.start()
         
         logger.info("Analytics task manager started")
     
     def stop(self):
-        """Stop the analytics task scheduler"""
+        """Остановка планировщика"""
         self.running = False
         if self.scheduler_thread:
             self.scheduler_thread.join(timeout=5)
         logger.info("Analytics task manager stopped")
     
     def _run_scheduler(self):
-        """Run the scheduler in a loop"""
+        """Запуск планировщика"""
         while self.running:
             try:
                 schedule.run_pending()
-                time.sleep(60)  # Check every minute
+                time.sleep(60)  # Проверка каждую минуту
             except Exception as e:
                 logger.error(f"Scheduler error: {e}")
     
     def _update_system_metrics(self):
-        """Update system metrics every 5 minutes"""
+        """Обновление системных метрик каждые 5 минут"""
         try:
             with get_db_session() as db:
                 analytics = AnalyticsService(db)
@@ -63,12 +63,12 @@ class AnalyticsTaskManager:
             logger.error(f"Error updating system metrics: {e}")
     
     def _cleanup_old_sessions(self):
-        """Clean up old inactive sessions"""
+        """Очистка старых неактивных сессий"""
         try:
             with get_db_session() as db:
                 cutoff_time = datetime.utcnow() - timedelta(hours=24)
                 
-                # Mark old sessions as inactive
+                # Отметить старые сессии как неактивные
                 from src.rag_chatbot.models.analytics import Session
                 old_sessions = db.query(Session).filter(
                     Session.last_accessed < cutoff_time,
@@ -85,23 +85,23 @@ class AnalyticsTaskManager:
             logger.error(f"Error cleaning up old sessions: {e}")
     
     def _generate_daily_reports(self):
-        """Generate daily analytics reports"""
+        """Создания ежедневного ответа"""
         try:
             with get_db_session() as db:
                 analytics = AnalyticsService(db)
                 
-                # Generate report for yesterday
+                # Создание отчета за вчера
                 yesterday = datetime.utcnow() - timedelta(days=1)
                 report_data = analytics.get_dashboard_data(hours=24)
                 
-                # Here you could save the report to a file, send email, etc.
+                # Здесь можно сохранить отчёт в файл, отправить по электронной почте и т.д.
                 logger.info(f"Daily report generated: {report_data.get('overview', {})}")
                 
         except Exception as e:
             logger.error(f"Error generating daily reports: {e}")
     
     def _cleanup_old_analytics(self):
-        """Clean up analytics data older than 90 days"""
+        """Очистка аналитических данных старше 90 дней"""
         try:
             with get_db_session() as db:
                 cutoff_time = datetime.utcnow() - timedelta(days=90)
@@ -110,17 +110,17 @@ class AnalyticsTaskManager:
                     Conversation, AnalyticsEvent, SystemMetrics
                 )
                 
-                # Delete old conversations
+                # Удаление старых разговоров
                 old_conversations = db.query(Conversation).filter(
                     Conversation.timestamp < cutoff_time
                 ).delete()
                 
-                # Delete old events
+                # Удаление старых ивнтов
                 old_events = db.query(AnalyticsEvent).filter(
                     AnalyticsEvent.timestamp < cutoff_time
                 ).delete()
                 
-                # Keep only daily system metrics (delete hourly ones older than 30 days)
+                # Оставлять только ежедневные системные метрики (удалять почасовые старше 30 дней)
                 old_metrics_cutoff = datetime.utcnow() - timedelta(days=30)
                 old_metrics = db.query(SystemMetrics).filter(
                     SystemMetrics.timestamp < old_metrics_cutoff
@@ -133,8 +133,7 @@ class AnalyticsTaskManager:
         except Exception as e:
             logger.error(f"Error cleaning up old analytics: {e}")
 
-# Global instance
-analytics_task_manager = AnalyticsTaskManager()
+
 
 # Alternative: Celery-based tasks (if you're using Celery)
 # from celery import Celery

@@ -10,14 +10,12 @@ from src.rag_chatbot.models.analytics import Base
 from src.rag_chatbot.utils.logger import logger
 from src.rag_chatbot.config.settings import settings
 
-# Database configuration
+# Конфигурация базы данных 
 DATABASE_URL = os.getenv(
     "DATABASE_URL", 
-    "postgresql://user:password@localhost/rag_analytics"  # Default PostgreSQL
+    "postgresql://user:password@localhost/rag_analytics"  # Дефолтная база PostgreSQL
 )
 
-# For development/testing, you can also use SQLite:
-DATABASE_URL = "sqlite:///./rag_analytics.db"
 
 # Create engine with appropriate settings
 if DATABASE_URL.startswith("sqlite"):
@@ -25,7 +23,7 @@ if DATABASE_URL.startswith("sqlite"):
         DATABASE_URL,
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
-        echo=False  # Set to True for SQL debugging
+        echo=False 
     )
 else:
     engine = create_engine(
@@ -33,14 +31,14 @@ else:
         pool_size=10,
         max_overflow=20,
         pool_pre_ping=True,
-        echo=False  # Set to True for SQL debugging
+        echo=False  # True для SQL дебагинга
     )
 
-# Create session factory
+# Создание фабрики сессий
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def create_tables():
-    """Create all database tables"""
+    """Создание всех таблиц базы данных"""
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created successfully")
@@ -49,7 +47,7 @@ def create_tables():
         raise
 
 def get_db() -> Generator[Session, None, None]:
-    """Dependency for getting database session"""
+    """Зависимость для получения сессии базы данных"""
     db = SessionLocal()
     try:
         yield db
@@ -58,7 +56,7 @@ def get_db() -> Generator[Session, None, None]:
 
 @contextmanager
 def get_db_session():
-    """Context manager for database sessions"""
+    """Контекстный менеджер для сессий базы данных"""
     db = SessionLocal()
     try:
         yield db
@@ -71,7 +69,7 @@ def get_db_session():
         db.close()
 
 def init_database():
-    """Initialize database and create tables"""
+    """Инициализация базы данных и создание таблиц"""
     try:
         logger.info("Initializing database...")
         create_tables()
@@ -80,9 +78,9 @@ def init_database():
         logger.error(f"Database initialization failed: {e}")
         raise
 
-# Health check function
+# Проверка состояния
 def check_database_health() -> bool:
-    """Check if database is accessible"""
+    """Проверка доступна ли база """
     try:
         with get_db_session() as db:
             db.execute(text("SELECT 1"))

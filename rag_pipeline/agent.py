@@ -23,11 +23,11 @@ from rag_pipeline.prompts import chatbot_prompt, query_generation_prompt
 
 class UnifiedRAGAgent:
     """
-    Unified RAG Agent that combines:
-    1. PDF document retrieval with semantic search
-    2. Smart RAG with automatic decision making
-    3. RAG Fusion with query generation
-    4. Conversation memory
+    Возможности:
+    1. Доставание нужных PDF-документов
+    2. Система решений — ответить прямо, искать информацию в базе данных или достать документ
+    3. RAG Fusion для генерации дополнительных запросов для поиска (перефразирование запроса пользователя)
+    4. Память о разговоре
     """
     
     def __init__(self,
@@ -40,15 +40,15 @@ class UnifiedRAGAgent:
                  memory_window_size: int = 10,
                  document_embeddings_path: Optional[str] = "document_embeddings.npy"):
         """
-        Initialize the Unified RAG Agent
+       Инициализация агентов
         Args:
-            local_index_path: Path to the FAISS vector store
-            embedding_model: Embedding model for vector store
-            documents_json_path: Path to JSON file containing document mappings
-            llm_params: Parameters for the LLM
-            openai_embedding_model: OpenAI embedding model for document search
+            local_index_path: путь к векторной базе FAISS
+            embedding_model: эмбеддинги базы 
+            documents_json_path: путь до JSON с названиями и адресами документов
+            llm_params: параметры LLM
+            openai_embedding_model: OpenAI embedding model для поиска докуметов
             openai_api_key: OpenAI API key
-            memory_window_size: Number of conversation turns to remember
+            memory_window_size: окно разговора для добавления в контекст
         """
         self.document_embeddings_path = document_embeddings_path
         self.local_index_path = local_index_path
@@ -62,7 +62,7 @@ class UnifiedRAGAgent:
         # In case you want to use other embeddings—REBUILD vector index
         self.openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else OpenAI()
         
-        # Initialize memory
+        # Инициализация памяти
         self.memory = ConversationBufferMemory(
             memory_key="chat_history",
             return_messages=True,
@@ -73,7 +73,7 @@ class UnifiedRAGAgent:
         self.document_mappings = self._load_document_mappings()
         self._load_or_build_semantic_index()
         
-        # Define all function tools
+        # Объявление всех инструментов LLM. Для добавления новый инструментов—добавлять сюда. 
         self.function_definitions = [
             {
                 "name": "retrieve_document",
@@ -147,7 +147,7 @@ Now analyze the user query and decide whether to retrieve a document, search the
         ])
 
     def _save_document_embeddings(self):
-        """Save document embeddings and names to a file."""
+        """Сохранение базы данных документов (эмбеддингов)"""
         try:
             data = {
                 "document_names": self.document_names,
@@ -160,7 +160,7 @@ Now analyze the user query and decide whether to retrieve a document, search the
             logger.error(f"Failed to save document embeddings: {e}")
 
     def _load_or_build_semantic_index(self):
-        """Load document embeddings if available, otherwise build and save them."""
+        """Подгрузить базу данных документов, если её нет—создать и сохранить """
         if os.path.exists(self.document_embeddings_path):
             try:
                 logger.info(f"Loading cached document embeddings from {self.document_embeddings_path}")
@@ -171,12 +171,11 @@ Now analyze the user query and decide whether to retrieve a document, search the
             except Exception as e:
                 logger.error(f"Failed to load cached embeddings: {e}")
         
-        # If not cached or failed to load — build and save
         self._build_semantic_index()
         self._save_document_embeddings()
 
     def _load_document_mappings(self) -> Dict[str, str]:
-        """Load document name to path mappings from JSON file"""
+        """Подгрузить JSON с информацией о документах"""
         try:
             with open(self.documents_json_path, 'r', encoding='utf-8') as f:
                 mappings = json.load(f)
@@ -190,7 +189,7 @@ Now analyze the user query and decide whether to retrieve a document, search the
             return {}
 
     def _get_openai_embedding(self, text: str) -> Optional[List[float]]:
-        """Get embedding from OpenAI API"""
+        """Получение эмбеддингов"""
         try:
             response = self.openai_client.embeddings.create(
                 model=self.openai_embedding_model,
@@ -203,7 +202,7 @@ Now analyze the user query and decide whether to retrieve a document, search the
             return None
 
     def _build_semantic_index(self):
-        """Build semantic search index for documents"""
+        """Создание базы для документов"""
         if not self.document_mappings:
             self.document_names = []
             self.document_embeddings = np.array([])
@@ -225,13 +224,13 @@ Now analyze the user query and decide whether to retrieve a document, search the
             self.document_embeddings = np.array([])
 
     def _get_document_list_summary(self) -> str:
-        """Get a summary of available documents"""
+        """Информация о доступных документах"""
         if not self.document_mappings:
             return "No documents available"
         return f"{len(self.document_mappings)} documents including: " + ", ".join(list(self.document_mappings.keys())[:5]) + "..."
 
     def _find_document_semantic(self, query: str) -> Optional[Tuple[str, str, float]]:
-        """Find best matching document using semantic search"""
+        """Поиск документов по запросу пользователя"""
         if len(self.document_embeddings) == 0:
             return None
         
@@ -243,7 +242,7 @@ Now analyze the user query and decide whether to retrieve a document, search the
         similarities = cosine_similarity(query_embedding, self.document_embeddings)[0]
         best_idx = np.argmax(similarities)
         
-        if similarities[best_idx] > 0.3:  # Threshold
+        if similarities[best_idx] > 0.3:  # порог
             doc_name = self.document_names[best_idx]
             doc_path = self.document_mappings[doc_name]
             if os.path.exists(doc_path):
@@ -252,22 +251,22 @@ Now analyze the user query and decide whether to retrieve a document, search the
         return None
 
     def retrieve_document(self, document_query: str) -> Dict[str, Any]:
-        """Retrieve a document using semantic search"""
+        """Достать документ с помощью семантического поиска"""
         logger.info(f"Searching for document: '{document_query}'")
         
-        # Try exact match first
+        # Попробовать найти по полному названию
         for doc_name, doc_path in self.document_mappings.items():
             if document_query.lower() in doc_name.lower() or doc_name.lower() in document_query.lower():
                 if os.path.exists(doc_path):
                     return self._create_document_response(doc_name, doc_path, 1.0, "exact_match")
         
-        # Try semantic search
+        # Семантический поиск
         result = self._find_document_semantic(document_query)
         if result:
             doc_name, doc_path, score = result
             return self._create_document_response(doc_name, doc_path, score, "semantic_match")
         
-        # No match found
+        # Нет результата
         return {
             "success": False,
             "message": f"No document found matching '{document_query}'",
@@ -275,7 +274,7 @@ Now analyze the user query and decide whether to retrieve a document, search the
         }
 
     def _create_document_response(self, doc_name: str, doc_path: str, score: float, match_type: str) -> Dict[str, Any]:
-        """Create standardized document response"""
+        """Стандартный ответ документа"""
         file_stat = os.stat(doc_path)
         file_size_mb = file_stat.st_size / (1024 * 1024)
         
@@ -290,11 +289,11 @@ Now analyze the user query and decide whether to retrieve a document, search the
         }
 
     def search_knowledge_base(self, query: str, mode: str = "generated", num_queries: int = 3) -> Dict[str, Any]:
-        """Search the knowledge base using RAG fusion with context-aware query generation"""
+        """Поиск по базе данных с генерацией дополнительных запросов"""
         try:
             logger.info(f"Searching knowledge base: '{query}' in {mode} mode")
             
-            # Load vector store
+            # Загрузка базы данны 
             vectorstore = FAISS.load_local(
                 self.local_index_path,
                 embeddings=self.embedding_model,
@@ -302,25 +301,25 @@ Now analyze the user query and decide whether to retrieve a document, search the
             )
             retriever = vectorstore.as_retriever()
             
-            # Generate queries if needed - NOW WITH CONTEXT
+            # Генерация дополнительных запросов
             if mode == "generated":
-                # Get conversation context for query generation
+                # История для контекста
                 context = self._get_conversation_context()
                 queries = self._generate_queries(query, num_queries, context)
             else:
                 queries = [query]
             
-            # Retrieve and fuse documents
+            # Достать документы
             all_docs = []
             for q in queries:
                 docs = retriever.invoke(q)
                 all_docs.append(docs)
             
-            # Apply reciprocal rank fusion
+            # Повторная оценка результатов 
             fused_docs = self._reciprocal_rank_fusion(all_docs)
-            top_docs = fused_docs[:3]  # Top 5 documents
+            top_docs = fused_docs[:3]  # Toп 3 документа
             
-            # Generate answer with context
+            # Сгенерировать ответ 
             context = self._get_conversation_context()
             answer = self._generate_answer(query, top_docs, context)
             
@@ -340,11 +339,11 @@ Now analyze the user query and decide whether to retrieve a document, search the
             }
 
     def _generate_queries(self, original_query: str, n: int, chat_context: str = "") -> List[str]:
-        """Generate multiple queries for better coverage with conversation context"""
+        """Генерация дополнительных запросов для поиска по базе данных"""
         prompt = query_generation_prompt
         chain = prompt | self.llm | StrOutputParser()
         
-        # Include chat context in query generation
+        # Включить предыдущий разговор для контекста
         result = chain.invoke({
             "query": original_query, 
             "n": n,
@@ -353,17 +352,17 @@ Now analyze the user query and decide whether to retrieve a document, search the
         
         queries = [q.strip() for q in result.split("\n") if q.strip()]
         
-        # Ensure we have at least the original query if generation fails
+        # Хотя бы оригинальный запрос 
         if not queries:
             queries = [original_query]
         
-        # Log generated queries for debugging
+        # Логирование дополнительных заппросов
         logger.info(f"Generated {len(queries)} queries with context: {queries}")
         
         return queries[:n]
 
     def _reciprocal_rank_fusion(self, results: List[List[Any]], k: int = 3) -> List[Any]:
-        """Apply reciprocal rank fusion to merge results"""
+        """Сортировка результатов"""
         fused_scores = {}
         
         for docs in results:
@@ -377,11 +376,9 @@ Now analyze the user query and decide whether to retrieve a document, search the
         return [item["doc"] for item in sorted_docs]
 
     def _generate_answer(self, query: str, documents: List[Any], context: str) -> str:
-        """Generate answer from documents with conversation context"""
+        """Сгенерировать ответ для генерации """
         prompt = chatbot_prompt
-        # doc_contents = "\n\n".join([doc.page_content for doc in documents])
         doc_contents = "\n\n".join([f"Exracted from: {doc.metadata['doc_info']}: {doc.page_content}" for doc in documents])
-        # print(doc_contents)
         
         chain = prompt | self.llm | StrOutputParser()
         return chain.invoke({
@@ -391,7 +388,7 @@ Now analyze the user query and decide whether to retrieve a document, search the
         })
 
     def _get_conversation_context(self) -> str:
-        """Get formatted conversation context"""
+        """Форматирование разговора для контекста"""
         if not self.conversation_history:
             return "No previous conversation."
         
@@ -403,23 +400,23 @@ Now analyze the user query and decide whether to retrieve a document, search the
         return "\n".join(context_parts)
 
     def _update_memory(self, user_query: str, response: str):
-        """Update conversation memory"""
+        """Обновление памяти разговора"""
         self.conversation_history.append({
             "user": user_query,
             "assistant": response,
             "timestamp": datetime.now().isoformat()
         })
         
-        # Keep only the last N turns
+        # Последние N разговоров
         if len(self.conversation_history) > self.memory_window_size:
             self.conversation_history = self.conversation_history[-self.memory_window_size:]
         
-        # Update langchain memory
+        # Обновление памяти
         self.memory.save_context({"input": user_query}, {"answer": response})
 
     def process_query(self, user_query: str, verbose: bool = False) -> Tuple[str, Dict[str, Any]]:
         """
-        Main entry point to process user queries
+        Основная функция для обработки запроса
         Returns:
             Tuple of (answer, metadata)
         """
@@ -456,15 +453,15 @@ Now analyze the user query and decide whether to retrieve a document, search the
                 metadata["function_args"] = function_args
                 
                 if function_name == "retrieve_document":
-                    # Handle document retrieval
+                    # Возрращение документа
                     result = self.retrieve_document(function_args['document_query'])
                     if result['success']:
                         answer = (
-                            f"✅ Found document: **{result['document_name']}**\n\n"
-                            f"📄 File: {os.path.basename(result['file_path'])}\n"
-                            f"📊 Size: {result['file_size_mb']} MB\n"
-                            f"📁 Location: {result['file_path']}\n"
-                            f"🎯 Match: {result['match_type']} (score: {result['match_score']})"
+                            f"Найден документ: **{result['document_name']}**\n\n"
+                            f"Файл: {os.path.basename(result['file_path'])}\n"
+                            f"Размер: {result['file_size_mb']} MB\n"
+                            # f"Расположение: {result['file_path']}\n"
+                            f"Соответствие: {result['match_type']} (score: {result['match_score']})"
                         )
                     else:
                         answer = result['message']
@@ -475,7 +472,7 @@ Now analyze the user query and decide whether to retrieve a document, search the
                     metadata.update(result)
                 
                 elif function_name == "search_knowledge_base":
-                    # Handle knowledge base search
+                    # Поиск по базе знаний
                     result = self.search_knowledge_base(
                         query=function_args.get('query', user_query),
                         mode=function_args.get('mode', 'generated'),
@@ -508,7 +505,7 @@ Now analyze the user query and decide whether to retrieve a document, search the
             return error_msg, metadata
 
     def _print_verbose_output(self, metadata: Dict[str, Any]):
-        """Print detailed execution information"""
+        """Распечатка результатов"""
         print(f"\n{'='*60}")
         print(f"UNIFIED RAG AGENT EXECUTION REPORT")
         print(f"{'='*60}")
@@ -531,28 +528,28 @@ Now analyze the user query and decide whether to retrieve a document, search the
         print(f"{'='*60}\n")
 
     def chat(self, user_query: str, verbose: bool = False) -> str:
-        """Simple chat interface that returns just the answer"""
+        """Простой интерфейс, который возвращает только ответ"""
         answer, _ = self.process_query(user_query, verbose)
         return answer
 
     def get_conversation_history(self) -> List[Dict[str, Any]]:
-        """Get the full conversation history"""
+        """Возвращает историю переписки"""
         return self.conversation_history
 
     def clear_memory(self):
-        """Clear conversation memory"""
+        """Очистка памяти"""
         self.conversation_history = []
         self.memory.clear()
         logger.info("Conversation memory cleared")
 
     def list_documents(self) -> str:
-        """List all available documents"""
+        """Показать все доступные документы"""
         if not self.document_mappings:
             return "No documents available."
         
         doc_list = []
         for i, (name, path) in enumerate(self.document_mappings.items(), 1):
-            exists = "✅" if os.path.exists(path) else "❌"
+            exists = "EXISTS:" if os.path.exists(path) else "NOT:"
             doc_list.append(f"{i}. {exists} {name}")
         
         return f"**Available Documents ({len(self.document_mappings)}):**\n" + "\n".join(doc_list)
@@ -566,14 +563,14 @@ def create_unified_rag_agent(
     memory_window_size: int = 10,
 ) -> UnifiedRAGAgent:
     """
-    Create a Unified RAG Agent instance
+    Создание объекта агента
     
     Args:
-        local_index_path: Path to FAISS index
-        embedding_model: Embedding model for FAISS
-        documents_json_path: Path to document mappings JSON
+        local_index_path: путь до базы FAISS
+        embedding_model: модель эмбеддингов для FAISS
+        documents_json_path: путь до JSON с названиями и адресами документов
         openai_api_key: OpenAI API key
-        memory_window_size: Number of conversation turns to remember
+        memory_window_size: окно разговора для добавления в контекст
     
     Returns:
         UnifiedRAGAgent instance

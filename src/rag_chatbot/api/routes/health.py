@@ -1,4 +1,3 @@
-# Move health check endpoints here
 from fastapi import APIRouter
 from src.rag_chatbot.models.schemas import HealthResponse
 from datetime import datetime

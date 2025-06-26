@@ -22,19 +22,19 @@ class AnalyticsService:
     def track_conversation(self, session_id: str, user_message: str, 
                           bot_response: str, metadata: Dict[str, Any],
                           response_time_ms: float = None) -> None:
-        """Track a conversation exchange"""
+        """Отслеживание переписки"""
         try:
-            # Ensure session exists
+            # Проверка есть ли сессия
             session = self.db.query(Session).filter(Session.id == session_id).first()
             if not session:
                 session = Session(id=session_id, total_messages=0)
                 self.db.add(session)
             
-            # Update session stats
+            # Обновление данных сессии
             session.last_accessed = datetime.utcnow()
             session.total_messages = (session.total_messages or 0) + 1
             
-            # Create conversation record
+            # Создание записи переписки
             conversation = Conversation(
                 session_id=session_id,
                 user_message=user_message,
@@ -52,12 +52,12 @@ class AnalyticsService:
                 chat_context_used=metadata.get('chat_context_used', False),
                 chat_context_length=metadata.get('chat_context_length', 0),
                 conversation_turn=metadata.get('conversation_turn', 1),
-                rate_limit_hit=False  # Will be updated if rate limit is hit
+                rate_limit_hit=False  # Обновляется если превышен лимит
             )
             
             self.db.add(conversation)
             
-            # Track document usage if document was retrieved
+            # Отслеживание данных если было решено достать документ 
             if metadata.get('decision') == 'retrieve_document' and metadata.get('success'):
                 self._track_document_usage(
                     metadata.get('document_name'),
@@ -65,10 +65,10 @@ class AnalyticsService:
                     metadata.get('match_score')
                 )
             
-            # Track query analytics
+            # Отслеживание аналитики запроса
             self._track_query_analytics(user_message, response_time_ms, metadata.get('success', True))
             
-            # Create analytics event
+            # Создание ивента аналитики 
             self._track_event(session_id, 'conversation', {
                 'decision_type': metadata.get('decision'),
                 'success': metadata.get('success', True),
@@ -82,14 +82,14 @@ class AnalyticsService:
             self.db.rollback()
     
     def track_rate_limit(self, session_id: str, retry_after: int) -> None:
-        """Track rate limit events"""
+        """Отслеживание событий ограничения"""
         try:
             self._track_event(session_id, 'rate_limit', {
                 'retry_after_seconds': retry_after,
                 'timestamp': datetime.utcnow().isoformat()
             })
             
-            # Update last conversation to mark rate limit hit
+            # Обновление последней переписки для отметки срабатывания ограничения скорости
             last_conv = self.db.query(Conversation).filter(
                 Conversation.session_id == session_id
             ).order_by(desc(Conversation.timestamp)).first()
@@ -105,14 +105,14 @@ class AnalyticsService:
     
     def track_document_download(self, session_id: str, document_name: str, 
                                file_size_mb: float) -> None:
-        """Track document downloads"""
+        """Отслеживание загрузок документов"""
         try:
             self._track_event(session_id, 'document_download', {
                 'document_name': document_name,
                 'file_size_mb': file_size_mb
             })
             
-            # Update document usage stats
+            # Обновление статистики использования документа
             doc_usage = self.db.query(DocumentUsage).filter(
                 DocumentUsage.document_name == document_name
             ).first()
@@ -128,7 +128,7 @@ class AnalyticsService:
             self.db.rollback()
     
     def track_error(self, session_id: str, error_type: str, error_message: str) -> None:
-        """Track system errors"""
+        """Отслеживание системных ошибок"""
         try:
             self._track_event(session_id, 'error', {
                 'error_type': error_type,
@@ -141,29 +141,30 @@ class AnalyticsService:
             self.db.rollback()
     
     def update_system_metrics(self) -> None:
-        """Update system-wide metrics"""
+        """Обновление системных метрик"""
         try:
-            # Calculate current metrics
+            # Вычисление текущих метрик
             now = datetime.utcnow()
             last_hour = now - timedelta(hours=1)
             
-            # Active sessions (accessed in last hour)
+            # Активные сессии (доступ за последний час)
             active_sessions = self.db.query(Session).filter(
                 Session.last_accessed >= last_hour
             ).count()
             
-            # Total requests in last hour
+            # Общее количество запросов за последний час
             total_requests = self.db.query(Conversation).filter(
                 Conversation.timestamp >= last_hour
             ).count()
             
-            # Average response time
+            # Среднее время отклика
+
             avg_response_time = self.db.query(func.avg(Conversation.response_time_ms)).filter(
                 Conversation.timestamp >= last_hour,
                 Conversation.response_time_ms.isnot(None)
             ).scalar() or 0.0
             
-            # Error rate
+            # Частота ошибок
             total_conversations = self.db.query(Conversation).filter(
                 Conversation.timestamp >= last_hour
             ).count()
@@ -175,15 +176,15 @@ class AnalyticsService:
             
             error_rate = (failed_conversations / total_conversations * 100) if total_conversations > 0 else 0.0
             
-            # Total cost
+            # Общая сумма
             total_cost = self.db.query(func.sum(Conversation.total_cost)).filter(
                 Conversation.timestamp >= last_hour
             ).scalar() or 0.0
             
-            # System memory usage
+            # Использование системной памяти
             memory_usage_mb = psutil.Process().memory_info().rss / 1024 / 1024
             
-            # Create system metrics record
+            # Создание записи системных метрик
             metrics = SystemMetrics(
                 active_sessions=active_sessions,
                 total_requests=total_requests,
@@ -205,7 +206,7 @@ class AnalyticsService:
         try:
             cutoff_time = datetime.utcnow() - timedelta(hours=hours)
             
-            # Basic stats
+            # Базовые статистики
             total_sessions = self.db.query(Session).filter(
                 Session.created_at >= cutoff_time
             ).count()
@@ -214,7 +215,7 @@ class AnalyticsService:
                 Conversation.timestamp >= cutoff_time
             ).count()
             
-            # Success rate
+            # Частота успеха
             successful_conversations = self.db.query(Conversation).filter(
                 Conversation.timestamp >= cutoff_time,
                 Conversation.success == True
@@ -222,7 +223,7 @@ class AnalyticsService:
             
             success_rate = (successful_conversations / total_conversations * 100) if total_conversations > 0 else 0.0
             
-            # Decision types distribution
+            # Распределение типов решений
             decision_stats = self.db.query(
                 Conversation.decision_type,
                 func.count(Conversation.id).label('count')
@@ -230,20 +231,20 @@ class AnalyticsService:
                 Conversation.timestamp >= cutoff_time
             ).group_by(Conversation.decision_type).all()
             
-            # Top documents
+            # Топ документов
             top_documents = self.db.query(
                 DocumentUsage.document_name,
                 DocumentUsage.access_count,
                 DocumentUsage.total_downloads
             ).order_by(desc(DocumentUsage.access_count)).limit(10).all()
             
-            # Top queries
+            # Топ запросов
             top_queries = self.db.query(
                 QueryAnalytics.query_text,
                 QueryAnalytics.frequency
             ).order_by(desc(QueryAnalytics.frequency)).limit(10).all()
             
-            # Hourly conversation trends (SQLite compatible)
+            # # Почасовые тренды переписок (совместимо с SQLite)
             hourly_stats = self.db.query(
                 func.strftime('%Y-%m-%d %H:00:00', Conversation.timestamp).label('hour'),
                 func.count(Conversation.id).label('count')
@@ -251,7 +252,7 @@ class AnalyticsService:
                 Conversation.timestamp >= cutoff_time
             ).group_by(func.strftime('%Y-%m-%d %H:00:00', Conversation.timestamp)).order_by('hour').all()
             
-            # Response time statistics (SQLite compatible - no percentile_cont)
+           # Статистика времени отклика (совместимо с SQLite — без percentile_cont)
             response_time_stats = self.db.query(
                 func.avg(Conversation.response_time_ms).label('avg'),
                 func.min(Conversation.response_time_ms).label('min'),
@@ -261,12 +262,12 @@ class AnalyticsService:
                 Conversation.response_time_ms.isnot(None)
             ).first()
             
-            # Cost analysis
+            # Анализ стоимости 
             total_cost = self.db.query(func.sum(Conversation.total_cost)).filter(
                 Conversation.timestamp >= cutoff_time
             ).scalar() or 0.0
             
-            # Rate limit events
+            # События ограничения
             rate_limit_events = self.db.query(AnalyticsEvent).filter(
                 AnalyticsEvent.timestamp >= cutoff_time,
                 AnalyticsEvent.event_type == 'rate_limit'
@@ -314,7 +315,7 @@ class AnalyticsService:
     
     def _track_document_usage(self, document_name: str, document_path: str, 
                              match_score: float) -> None:
-        """Internal method to track document usage"""
+        """Внутренний метод для отслеживания использования документа"""
         if not document_name:
             return
             
@@ -325,7 +326,7 @@ class AnalyticsService:
         if doc_usage:
             doc_usage.access_count += 1
             doc_usage.last_accessed = datetime.utcnow()
-            # Update average match score
+            # Обновление среднего коэффициента совпадения
             if match_score:
                 if doc_usage.avg_match_score:
                     doc_usage.avg_match_score = (doc_usage.avg_match_score + match_score) / 2
@@ -342,7 +343,7 @@ class AnalyticsService:
     
     def _track_query_analytics(self, query_text: str, response_time: float, 
                               success: bool) -> None:
-        """Internal method to track query analytics"""
+        """Внутренний метод для отслеживания аналитики запросов"""
         query_hash = hashlib.md5(query_text.lower().encode()).hexdigest()
         
         query_analytics = self.db.query(QueryAnalytics).filter(
@@ -353,7 +354,7 @@ class AnalyticsService:
             query_analytics.frequency += 1
             query_analytics.last_used = datetime.utcnow()
             
-            # Update average response time
+            # Обновление среднего времени отклика
             if response_time and query_analytics.avg_response_time:
                 query_analytics.avg_response_time = (
                     query_analytics.avg_response_time + response_time
@@ -361,7 +362,7 @@ class AnalyticsService:
             elif response_time:
                 query_analytics.avg_response_time = response_time
             
-            # Update success rate
+            # Обновление коэффициента успешных ответов
             total_uses = query_analytics.frequency
             current_successes = query_analytics.success_rate * (total_uses - 1)
             new_successes = current_successes + (1 if success else 0)
@@ -378,7 +379,7 @@ class AnalyticsService:
             self.db.add(query_analytics)
     
     def _track_event(self, session_id: str, event_type: str, event_data: Dict) -> None:
-        """Internal method to track analytics events"""
+        """Внутренний метод для отслеживания аналитических событий"""
         event = AnalyticsEvent(
             session_id=session_id,
             event_type=event_type,

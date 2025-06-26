@@ -5,7 +5,7 @@ import uuid
 from src.rag_chatbot.utils.logger import logger
 
 class SessionManager:
-    """Manages chat sessions and conversation memory"""
+    """Чат сессии и память разговора"""
     
     def __init__(self, session_timeout_minutes: int = 30, max_memory_length: int = 10):
         self.sessions: Dict[str, Dict] = {}
@@ -28,22 +28,22 @@ class SessionManager:
         return session_id
     
     def get_session(self, session_id: str) -> Optional[Dict]:
-        """Get session by ID"""
+        """Получение сессии по ID"""
         if session_id not in self.sessions:
             return None
         
         session = self.sessions[session_id]
-        # Check if session has expired
+        # Проверка если сессия уже истекла
         if datetime.now() - session["last_accessed"] > self.session_timeout:
             self.delete_session(session_id)
             return None
         
-        # Update last accessed time
+        # Обновление времени последнего доступа сессии
         session["last_accessed"] = datetime.now()
         return session
     
     def delete_session(self, session_id: str) -> bool:
-        """Delete a session"""
+        """Удаление сессии"""
         if session_id in self.sessions:
             del self.sessions[session_id]
             logger.info(f"Deleted session: {session_id}")
@@ -51,11 +51,11 @@ class SessionManager:
         return False
     
     def get_active_session_ids(self) -> set:
-        """Get set of all active session IDs"""
+        """Получить ID всех активные сессий"""
         return set(self.sessions.keys())
     
     def cleanup_expired_sessions(self):
-        """Remove expired sessions"""
+        """Удаление истекших по времени сессий"""
         current_time = datetime.now()
         expired_sessions = [
             sid for sid, session in self.sessions.items()
@@ -69,7 +69,7 @@ class SessionManager:
             logger.info(f"Cleaned up {len(expired_sessions)} expired sessions")
     
     def get_session_stats(self) -> Dict:
-        """Get statistics about active sessions"""
+        """Получение статистики по активным сессиям"""
         return {
             "active_sessions": len(self.sessions),
             "sessions": {

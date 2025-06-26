@@ -1,5 +1,10 @@
 # project before migrating to a new version of the project.
 old_ones/
+CLAUDE.md
+error.ipynb
+metadata_info.json
+package-lock.json
+package.json
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

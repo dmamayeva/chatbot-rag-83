@@ -21,11 +21,11 @@ class Settings(BaseSettings):
     document_embeddings_path: str = "./data/document_embeddings.npy"
 
     # memory settings
-    memory_window_size: int = 5 # number of previous messages to remember in the chat context
+    memory_window_size: int = 5 # кол-во сообщений, используемых для контекста истории переписки 
 
     # Chatbot settings
     session_timeout_minutes: int = 30
-    max_memory_length: int = 10 # maximum number of messages to remember
+    max_memory_length: int = 10 # максимальное кол-во сообщений, используемых для контекста
     rate_limit_requests: int = 5
     rate_limit_window_minutes: int = 1
     

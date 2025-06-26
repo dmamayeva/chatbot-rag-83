@@ -5,7 +5,7 @@ from collections import deque
 from src.rag_chatbot.utils.logger import logger
 
 class RateLimiter:
-    """Rate limiter for tracking message frequency per session"""
+    """Ограничитель для отслеживания частоты сообщений на сессию"""
     
     def __init__(self, max_requests: int = 5, time_window_minutes: int = 1):
         self.max_requests = max_requests
@@ -14,12 +14,13 @@ class RateLimiter:
     
     def is_allowed(self, session_id: str) -> tuple[bool, Optional[float]]:
         """
-        Check if request is allowed for session
-        Returns (is_allowed, seconds_until_reset)
+        Проверяет можно ли отправлять сообщение
+        Input: session_id — id сессии
+        Returns: (is_allowed, seconds_until_reset)
         """
         current_time = datetime.now()
         
-        # Initialize session if not exists
+        # Создает сессию если её не было 
         if session_id not in self.request_history:
             self.request_history[session_id] = deque()
         
@@ -63,11 +64,11 @@ class RateLimiter:
         session_requests = self.request_history[session_id]
         cutoff_time = current_time - self.time_window
         
-        # Count valid requests in current window
+        # Удаление старых запросов вне временного окна
         valid_requests = [req for req in session_requests if req >= cutoff_time]
         requests_remaining = max(0, self.max_requests - len(valid_requests))
         
-        # Calculate reset time
+        # Вычисление до времени сброса
         window_reset_seconds = 0
         if valid_requests:
             oldest_valid = min(valid_requests)

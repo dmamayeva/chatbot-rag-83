@@ -27,14 +27,14 @@ async def chat(
     credentials = Depends(get_api_key),
     db = Depends(get_db)
 ):
-    """Main chat endpoint with conversation memory, rate limiting, analytics, and file serving"""
+    """Основной эндпоинт чата, включающий: - память чата - rate limiting  - отправкой файлов"""
     start_time = time.time()
     analytics = AnalyticsService(db)
     
     try:
         logger.info(f"Received chat request: {chat_request.message}")
         
-        # Get or create session
+        # Создание или получение сессии 
         if chat_request.session_id:
             session = session_manager.get_session(chat_request.session_id)
             if not session:
@@ -44,40 +44,38 @@ async def chat(
             session_id = session_manager.create_session()
             session = session_manager.get_session(session_id)
         
-        # Check rate limit
+        # Проверка Лимита
         is_allowed, retry_after = rate_limiter.is_allowed(session_id)
         rate_limit_stats = rate_limiter.get_session_stats(session_id)
         
         if not is_allowed:
             logger.warning(f"Rate limit exceeded for session {session_id}")
             
-            # Track rate limit event
+            # Трекинг лимита для аналитики
             analytics.track_rate_limit(session_id, retry_after)
             
             raise HTTPException(
                 status_code=429,
                 detail={
-                    "message": "Rate limit exceeded. You can send up to 5 messages per minute.",
+                    "message": "Rate limit exceeded. You can send up to {settings.rate_limit_requests} messages per {settings.rate_limit_window_minutes} minute.",
                     "retry_after_seconds": retry_after,
                     "rate_limit": rate_limit_stats
                 }
             )
         
-        # Get conversation memory
+        # Получение предыдущего разговора и создание контекста для промпта на основе истории 
         memory = session["memory"]
-        
-        # Build context from conversation history
         conversation_history = memory.chat_memory.messages
         context_messages = []
         
-        # Format conversation history
+        # Форматирование разговора для добавление в промпт
         for msg in conversation_history:
             if isinstance(msg, HumanMessage):
                 context_messages.append(f"User: {msg.content}")
             elif isinstance(msg, AIMessage):
                 context_messages.append(f"Zaure: {msg.content}")
         
-        # Limit to last N exchanges for context
+        # Ограничение последними N обменами для контекста (чтобы избежать ограничения по токенам)
         max_history = settings.max_memory_length
         if context_messages:
             recent_messages = context_messages[-max_history:] if len(context_messages) > max_history else context_messages
@@ -87,11 +85,11 @@ async def chat(
             chat_context = ""
             logger.info("No previous conversation history")
         
-        # Get RAG response with chat context
+        # Получение ответа от LLM для контекста
         logger.info(f"Processing query for session {session_id}: {chat_request.message}")
         logger.info(f"Chat context length: {len(chat_context)} characters")
         
-        # Process query using the RAG pipeline
+        # Обработка запроса с помощью RAG + OpenAI
         answer, meta = rag_pipeline.get_response(
             user_query=chat_request.message
         )
@@ -99,28 +97,28 @@ async def chat(
         # Calculate response time
         response_time_ms = (time.time() - start_time) * 1000
         
-        # Check if decision was to retrieve document and file exists
+        # пайплайн для получения документов—проверка если система решила достать документ и проверка есть ли он 
         if (meta.get("decision") == "retrieve_document" and 
             meta.get("success") and 
             meta.get("file_path")):
             
             file_path = meta["file_path"]
             
-            # Verify file exists and is readable
+            
             if os.path.exists(file_path) and os.path.isfile(file_path):
                 file_extension = Path(file_path).suffix.lower()
                 if file_extension == '.pdf':
                     logger.info(f"Returning PDF file: {file_path}")
                     
-                    # Update conversation memory before returning file
+                    # обновление памяти чата
                     memory.chat_memory.add_user_message(chat_request.message)
                     memory.chat_memory.add_ai_message(f"Retrieved document: {meta.get('document_name', 'Unknown')}")
                     
-                    # Update session stats
+                    # обновление сессии
                     session["message_count"] += 1
                     session["last_accessed"] = datetime.now()
                     
-                    # Track analytics for document retrieval
+                    # трекинг аналитики
                     background_tasks.add_task(
                         analytics.track_conversation,
                         session_id,
@@ -130,7 +128,7 @@ async def chat(
                         response_time_ms
                     )
                     
-                    # Track document download
+                    # трекинг скачивания документов
                     background_tasks.add_task(
                         analytics.track_document_download,
                         session_id,
@@ -138,7 +136,7 @@ async def chat(
                         meta.get('file_size_mb', 0)
                     )
                     
-                    # Safely encode metadata for headers
+                    # Безопасное кодирование метаданных для заголовков (HTTP-заголовки должны быть в кодировке Latin-1)
                     def safe_encode_header(value: str) -> str:
                         if not value:
                             return "Unknown"
@@ -150,7 +148,7 @@ async def chat(
                             encoded_bytes = value.encode('utf-8')
                             return base64.b64encode(encoded_bytes).decode('ascii')
                     
-                    # Prepare safe headers
+                    
                     safe_headers = {
                         "X-Session-ID": session_id,
                         "X-Document-Name-B64": safe_encode_header(meta.get('document_name', 'Unknown')),
@@ -159,7 +157,7 @@ async def chat(
                         "X-Document-Name-Original": "true" if meta.get('document_name', '').isascii() else "false"
                     }
                     
-                    # Return the PDF file
+                    # PDF-файл
                     return FileResponse(
                         path=file_path,
                         media_type='application/pdf',
@@ -171,16 +169,16 @@ async def chat(
             else:
                 logger.warning(f"File does not exist or is not readable: {file_path}")
 
-        # Normal response flow (not a document retrieval or file doesn't exist)
-        # Update conversation memory AFTER getting the response
+        # Обычный ответ (без документа)
+        # Обновление памяти после получения разговора 
         memory.chat_memory.add_user_message(chat_request.message)
         memory.chat_memory.add_ai_message(answer)
         
-        # Update session stats
+        
         session["message_count"] += 1
         session["last_accessed"] = datetime.now()
         
-        # Add chat context info to metadata
+        # Добавить контекст для метаданных
         meta["chat_context_used"] = len(chat_context) > 0
         meta["chat_context_length"] = len(chat_context)
         meta["conversation_turn"] = session["message_count"]
@@ -188,7 +186,7 @@ async def chat(
         meta["user_agent"] = request.headers.get("user-agent")
         meta["ip_address"] = request.client.host
         
-        # Track analytics in background
+        # Трекинг аналитики
         background_tasks.add_task(
             analytics.track_conversation,
             session_id,
@@ -198,10 +196,10 @@ async def chat(
             response_time_ms
         )
         
-        # Get updated rate limit stats after processing
+        # Обновление rate limit 
         updated_rate_limit_stats = rate_limiter.get_session_stats(session_id)
         
-        # Prepare response
+        # Ответ
         response = ChatResponse(
             response=answer,
             session_id=session_id,
@@ -215,7 +213,7 @@ async def chat(
         return response
         
     except HTTPException:
-        # Track error analytics for HTTP exceptions
+        # Трекинг аналитики для HTTP ошибок
         if 'session_id' in locals():
             background_tasks.add_task(
                 analytics.track_error,
@@ -227,7 +225,7 @@ async def chat(
     except Exception as e:
         logger.error(f"Chat processing error: {str(e)}", exc_info=True)
         
-        # Track error analytics
+        # Трекинг аналитики ошибок
         if 'session_id' in locals():
             background_tasks.add_task(
                 analytics.track_error,
@@ -244,7 +242,7 @@ async def get_analytics_dashboard(
     credentials = Depends(get_api_key),
     db = Depends(get_db)
 ):
-    """Get analytics dashboard data"""
+    """Получение данных для дэшборда аналитики"""
     try:
         analytics = AnalyticsService(db)
         dashboard_data = analytics.get_dashboard_data(hours=hours)

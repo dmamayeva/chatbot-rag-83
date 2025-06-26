@@ -14,19 +14,19 @@ from src.rag_chatbot.utils.logger import logger
 
 # Analytics imports
 from src.rag_chatbot.core.database import init_database, check_database_health
-from src.rag_chatbot.tasks.analytics_tasks import analytics_task_manager
+from src.rag_chatbot.core.instances import analytics_task_manager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown with analytics"""
     logger.info("Starting RAG Chatbot API with Analytics...")
     
-    # Initialize database for analytics
+    # Инициализация базы для аналитики
     try:
         init_database()
         logger.info("Analytics database initialized successfully")
         
-        # Check database health
+        # Проверка состояния базы
         if not check_database_health():
             logger.warning("Database health check failed, continuing without analytics")
         else:
@@ -35,12 +35,12 @@ async def lifespan(app: FastAPI):
         logger.error(f"Analytics database initialization failed: {e}")
         logger.warning("Continuing without analytics database")
     
-    # Start background cleanup task
+    # Фоновая очистка
     cleanup_task = asyncio.create_task(
         periodic_cleanup(chat.session_manager, chat.rate_limiter)
     )
     
-    # Start analytics task manager
+    # Аналитика и планировщик задач
     try:
         analytics_task_manager.start()
         logger.info("Analytics task manager started")
@@ -50,17 +50,16 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        # Shutdown
+        # Отключение
         logger.info("Shutting down RAG Chatbot API...")
         
-        # Stop analytics task manager
+        # Остановка аналитики и планировщика задач
         try:
             analytics_task_manager.stop()
             logger.info("Analytics task manager stopped")
         except Exception as e:
             logger.error(f"Error stopping analytics task manager: {e}")
         
-        # Cancel cleanup task
         cleanup_task.cancel()
         try:
             await cleanup_task
@@ -70,9 +69,9 @@ async def lifespan(app: FastAPI):
         logger.info("RAG Chatbot API shutdown completed")
 
 app = FastAPI(
-    title="RAG Chatbot API with Analytics",
-    description="Production-ready RAG chatbot with session-based conversation memory, rate limiting, and comprehensive analytics",
-    version="1.0.0",
+    title=settings.app_name,
+    description="AI-ассистент для объяснения приказов",
+    version=settings.version,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc"
@@ -87,16 +86,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routes with /api/v1 prefix
+# Добавление API рутеров
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
 app.include_router(health.router, prefix="/api/v1/health", tags=["health"])
 app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
 
-# Include routes without prefix for convenience (optional)
+# Добавление рутеров без префиксов
 app.include_router(chat.router, prefix="/chat", tags=["chat-direct"])
 app.include_router(sessions.router, prefix="/sessions", tags=["sessions-direct"])
 
-# Mount static files for analytics dashboard
+# Добавление static папки для дэшборда
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
@@ -107,7 +106,7 @@ async def root():
     """Root endpoint with API information"""
     return {
         "message": "RAG Chatbot API with Analytics",
-        "version": "1.0.0",
+        "version": settings.version,
         "status": "running",
         "features": [
             "RAG-based document retrieval",
@@ -127,7 +126,7 @@ async def root():
         }
     }
 
-# Analytics Dashboard endpoint
+# эндпоинт аналитики
 @app.get("/analytics", response_class=HTMLResponse, include_in_schema=False)
 async def analytics_dashboard():
     """Serve the analytics dashboard"""
@@ -376,40 +375,552 @@ async def analytics_dashboard():
     """
     return HTMLResponse(content=dashboard_html)
 
-# Serve the HTML chat interface
-@app.get("/chat-ui", include_in_schema=False)
+# Интерфейс
+@app.get("/chat-ui", response_class=HTMLResponse, include_in_schema=False)
 async def serve_chat_interface():
-    """Serve the chat interface"""
-    # Check for HTML file in different locations
-    possible_paths = [
-        "static/index.html",
-        "embed/index.html", 
-        "templates/index.html",
-        "index.html"
-    ]
-    
-    for html_path in possible_paths:
-        if os.path.exists(html_path):
-            return FileResponse(html_path)
-    
-    # If no HTML file found, return helpful message
-    raise HTTPException(
-        status_code=404,
-        detail=f"Chat interface not found. Please save your HTML file as one of: {possible_paths}"
-    )
+    """Serve the chat interface compatible with PDF handling and markdown"""
+    chat_html = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>AI-ассистент "Ұстаз"</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                height: 100vh;
+                display: flex;
+                flex-direction: column;
+            }
+            .header {
+                background: white;
+                padding: 20px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                text-align: center;
+            }
+            .header h1 {
+                color: #2c3e50;
+                font-size: 1.8rem;
+                background: linear-gradient(45deg, #667eea, #764ba2);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+                margin-bottom: 5px;
+            }
+            .header p {
+                color: #7f8c8d;
+                font-size: 0.9rem;
+            }
+            .chat-container {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                max-width: 1200px;
+                margin: 20px auto;
+                background: white;
+                border-radius: 15px;
+                overflow: hidden;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            }
+            .messages {
+                flex: 1;
+                padding: 20px;
+                overflow-y: auto;
+                display: flex;
+                flex-direction: column;
+                gap: 15px;
+                background: #f8f9fa;
+            }
+            .message {
+                max-width: 85%;
+                padding: 12px 18px;
+                border-radius: 18px;
+                word-wrap: break-word;
+                line-height: 1.5;
+            }
+            .user-message {
+                align-self: flex-end;
+                background: linear-gradient(45deg, #667eea, #764ba2);
+                color: white;
+            }
+            .bot-message {
+                align-self: flex-start;
+                background: white;
+                border: 1px solid #e9ecef;
+                color: #2c3e50;
+            }
+            .pdf-message {
+                align-self: flex-start;
+                background: white;
+                border: 2px solid #667eea;
+                border-radius: 15px;
+                padding: 20px;
+                max-width: 95%;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            }
+            .pdf-header {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 15px;
+                padding-bottom: 10px;
+                border-bottom: 1px solid #e9ecef;
+            }
+            .pdf-title {
+                font-weight: bold;
+                color: #2c3e50;
+                font-size: 1.1rem;
+            }
+            .pdf-metadata {
+                display: flex;
+                gap: 20px;
+                margin-bottom: 15px;
+                font-size: 0.9rem;
+                color: #7f8c8d;
+            }
+            .pdf-viewer-container {
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                overflow: hidden;
+                margin-bottom: 15px;
+            }
+            .pdf-viewer {
+                width: 100%;
+                height: 500px;
+                border: none;
+            }
+            .pdf-actions {
+                display: flex;
+                gap: 10px;
+                align-items: center;
+            }
+            .download-btn {
+                background: linear-gradient(45deg, #667eea, #764ba2);
+                color: white;
+                padding: 8px 16px;
+                border: none;
+                border-radius: 6px;
+                cursor: pointer;
+                text-decoration: none;
+                font-size: 0.9rem;
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
+                transition: transform 0.2s ease;
+            }
+            .download-btn:hover {
+                transform: translateY(-2px);
+                text-decoration: none;
+                color: white;
+            }
+            .file-info {
+                font-size: 0.8rem;
+                color: #7f8c8d;
+            }
+            .input-container {
+                display: flex;
+                padding: 20px;
+                background: white;
+                border-top: 1px solid #e9ecef;
+                gap: 10px;
+            }
+            .message-input {
+                flex: 1;
+                padding: 12px 18px;
+                border: 2px solid #e9ecef;
+                border-radius: 25px;
+                outline: none;
+                font-size: 14px;
+                transition: border-color 0.3s ease;
+                resize: none;
+                min-height: 20px;
+                max-height: 100px;
+            }
+            .message-input:focus {
+                border-color: #667eea;
+            }
+            .send-button {
+                padding: 12px 24px;
+                background: linear-gradient(45deg, #667eea, #764ba2);
+                color: white;
+                border: none;
+                border-radius: 25px;
+                cursor: pointer;
+                font-weight: 600;
+                transition: transform 0.2s ease;
+                min-width: 80px;
+            }
+            .send-button:hover {
+                transform: translateY(-2px);
+            }
+            .send-button:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+                transform: none;
+            }
+            .typing-indicator {
+                align-self: flex-start;
+                padding: 12px 18px;
+                background: white;
+                border: 1px solid #e9ecef;
+                border-radius: 18px;
+                color: #7f8c8d;
+                font-style: italic;
+            }
+            .error-message {
+                background: #e74c3c;
+                color: white;
+                text-align: center;
+                padding: 10px;
+                border-radius: 8px;
+                margin: 10px 0;
+            }
+            .session-info {
+                background: #e8f5e8;
+                color: #2d5a2d;
+                padding: 8px 12px;
+                border-radius: 6px;
+                font-size: 0.8rem;
+                text-align: center;
+                margin-bottom: 10px;
+            }
+            .markdown-content {
+                line-height: 1.6;
+            }
+            .markdown-content h1, .markdown-content h2, .markdown-content h3 {
+                margin: 10px 0;
+                color: #2c3e50;
+            }
+            .markdown-content p {
+                margin: 8px 0;
+            }
+            .markdown-content ul, .markdown-content ol {
+                margin: 8px 0 8px 20px;
+            }
+            .markdown-content code {
+                background: #f4f4f4;
+                padding: 2px 4px;
+                border-radius: 3px;
+                font-family: 'Courier New', monospace;
+            }
+            .markdown-content pre {
+                background: #f4f4f4;
+                padding: 10px;
+                border-radius: 6px;
+                overflow-x: auto;
+                margin: 10px 0;
+            }
+            .status-badge {
+                display: inline-block;
+                padding: 4px 8px;
+                border-radius: 12px;
+                font-size: 0.8rem;
+                font-weight: 500;
+            }
+            .match-exact { background: #d4edda; color: #155724; }
+            .match-semantic { background: #d1ecf1; color: #0c5460; }
+            .match-partial { background: #fff3cd; color: #856404; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>🤖 AI-ассистент "Ұстаз"</h1>
+            <p>Разработан АО "Өрлеу"</p>
+        </div>
 
-# Health check endpoint with analytics status
+        <div class="chat-container">
+            <div class="session-info" id="sessionInfo" style="display: none;">
+                Сессия создана успешно
+            </div>
+            
+            <div class="messages" id="messages">
+                <div class="bot-message">
+                    <div class="markdown-content">Здравствуйте! Я AI-ассистент разработанный АО "Өрлеу". Как я могу помочь вам сегодня?</div>
+                </div>
+            </div>
+            
+            <div class="input-container">
+                <textarea 
+                    class="message-input" 
+                    id="messageInput" 
+                    placeholder="Введите ваше сообщение..."
+                    rows="1"
+                    onkeydown="handleKeyDown(event)"
+                ></textarea>
+                <button class="send-button" id="sendButton" onclick="sendMessage()">
+                    Отправить
+                </button>
+            </div>
+        </div>
+
+        <script>
+            let currentSessionId = null;
+            let isLoading = false;
+
+            // Initialize session on page load
+            document.addEventListener('DOMContentLoaded', function() {
+                createSession();
+                autoResizeTextarea();
+            });
+
+            async function createSession() {
+                try {
+                    const response = await fetch('/api/v1/sessions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        currentSessionId = data.session_id;
+                        document.getElementById('sessionInfo').style.display = 'block';
+                        setTimeout(() => {
+                            document.getElementById('sessionInfo').style.display = 'none';
+                        }, 3000);
+                    } else {
+                        showError('Не удалось создать сессию');
+                    }
+                } catch (error) {
+                    console.error('Error creating session:', error);
+                    showError('Ошибка подключения к серверу');
+                }
+            }
+
+            async function sendMessage() {
+                const input = document.getElementById('messageInput');
+                const sendButton = document.getElementById('sendButton');
+                const messagesContainer = document.getElementById('messages');
+                
+                const message = input.value.trim();
+                if (!message || isLoading) return;
+
+                if (!currentSessionId) {
+                    showError('Сессия не создана. Обновите страницу.');
+                    return;
+                }
+
+                // Disable input and show user message
+                isLoading = true;
+                input.disabled = true;
+                sendButton.disabled = true;
+                input.value = '';
+                resetTextareaHeight();
+
+                // Add user message to chat
+                addMessage(message, 'user');
+
+                // Show typing indicator
+                const typingIndicator = addTypingIndicator();
+
+                try {
+                    const response = await fetch('/api/v1/chat/', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            message: message,
+                            session_id: currentSessionId,
+                            mode: "generated"
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    // Check content type
+                    const contentType = response.headers.get('content-type') || '';
+                    
+                    if (contentType.includes('application/pdf')) {
+                        // Handle PDF response
+                        const pdfData = await response.arrayBuffer();
+                        const pdfBlob = new Blob([pdfData], { type: 'application/pdf' });
+                        
+                        // Extract metadata from headers
+                        const isOriginal = response.headers.get('X-Document-Name-Original') === 'true';
+                        const documentNameHeader = response.headers.get('X-Document-Name-B64') || 'Unknown Document';
+                        const documentName = isOriginal ? documentNameHeader : atob(documentNameHeader);
+                        const matchScore = response.headers.get('X-Match-Score') || 'N/A';
+                        const matchType = response.headers.get('X-Match-Type') || 'N/A';
+                        
+                        // Get filename from Content-Disposition
+                        let filename = 'document.pdf';
+                        const contentDisposition = response.headers.get('content-disposition') || '';
+                        if (contentDisposition.includes('filename=')) {
+                            filename = contentDisposition.split('filename=')[1].replace(/"/g, '');
+                        }
+
+                        typingIndicator.remove();
+                        addPdfMessage(pdfBlob, filename, documentName, matchScore, matchType);
+                        
+                    } else {
+                        // Handle JSON response
+                        const data = await response.json();
+                        
+                        // Update session ID if provided
+                        if (data.session_id) {
+                            currentSessionId = data.session_id;
+                        }
+
+                        typingIndicator.remove();
+                        addMessage(data.response || 'Извините, не удалось получить ответ.', 'bot');
+                    }
+
+                } catch (error) {
+                    console.error('Error sending message:', error);
+                    typingIndicator.remove();
+                    addMessage('Извините, произошла ошибка. Попробуйте еще раз.', 'bot');
+                    showError('Ошибка отправки сообщения');
+                } finally {
+                    // Re-enable input
+                    isLoading = false;
+                    input.disabled = false;
+                    sendButton.disabled = false;
+                    input.focus();
+                }
+            }
+
+            function addMessage(text, sender) {
+                const messagesContainer = document.getElementById('messages');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${sender}-message`;
+                
+                if (sender === 'bot') {
+                    // Parse markdown for bot messages
+                    const markdownContent = document.createElement('div');
+                    markdownContent.className = 'markdown-content';
+                    markdownContent.innerHTML = marked.parse(text);
+                    messageDiv.appendChild(markdownContent);
+                } else {
+                    messageDiv.textContent = text;
+                }
+                
+                messagesContainer.appendChild(messageDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                return messageDiv;
+            }
+
+            function addPdfMessage(pdfBlob, filename, documentName, matchScore, matchType) {
+                const messagesContainer = document.getElementById('messages');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'pdf-message';
+                
+                // Create PDF viewer URL
+                const pdfUrl = URL.createObjectURL(pdfBlob);
+                
+                // Determine match type styling
+                let matchClass = 'match-partial';
+                if (matchType.toLowerCase().includes('exact')) matchClass = 'match-exact';
+                else if (matchType.toLowerCase().includes('semantic')) matchClass = 'match-semantic';
+                
+                messageDiv.innerHTML = `
+                    <div class="pdf-header">
+                        <span style="font-size: 1.5rem;">📄</span>
+                        <div>
+                            <div class="pdf-metadata">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="pdf-viewer-container">
+                        <iframe src="${pdfUrl}" class="pdf-viewer" type="application/pdf">
+                            <p>Ваш браузер не поддерживает просмотр PDF. 
+                               <a href="${pdfUrl}" download="${escapeHtml(filename)}">Скачать файл</a>
+                            </p>
+                        </iframe>
+                    </div>
+                    
+                    <div class="pdf-actions">
+                        <a href="${pdfUrl}" download="${escapeHtml(filename)}" class="download-btn">
+                            📥 Скачать ${escapeHtml(filename)}
+                        </a>
+                        <div class="file-info">
+                            Размер: ${(pdfBlob.size / 1024).toFixed(1)} KB
+                        </div>
+                    </div>
+                `;
+                
+                messagesContainer.appendChild(messageDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                return messageDiv;
+            }
+
+            function addTypingIndicator() {
+                const messagesContainer = document.getElementById('messages');
+                const typingDiv = document.createElement('div');
+                typingDiv.className = 'typing-indicator';
+                typingDiv.textContent = 'Ищу ответ... Пожалуйста, подождите.';
+                messagesContainer.appendChild(typingDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                return typingDiv;
+            }
+
+            function handleKeyDown(event) {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    sendMessage();
+                } else if (event.key === 'Enter' && event.shiftKey) {
+                    // Allow new line with Shift+Enter
+                    autoResizeTextarea();
+                }
+            }
+
+            function autoResizeTextarea() {
+                const textarea = document.getElementById('messageInput');
+                textarea.style.height = 'auto';
+                textarea.style.height = Math.min(textarea.scrollHeight, 100) + 'px';
+            }
+
+            function resetTextareaHeight() {
+                const textarea = document.getElementById('messageInput');
+                textarea.style.height = 'auto';
+            }
+
+            function showError(message) {
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error-message';
+                errorDiv.textContent = message;
+                document.body.insertBefore(errorDiv, document.body.firstChild);
+                
+                setTimeout(() => {
+                    errorDiv.remove();
+                }, 5000);
+            }
+
+            function escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            // Auto-resize textarea on input
+            document.getElementById('messageInput').addEventListener('input', autoResizeTextarea);
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=chat_html)
+
+# Проверка состояния с аналитикой
 @app.get("/health-extended", include_in_schema=False)
 async def extended_health_check():
     """Extended health check including analytics status"""
     try:
-        # Basic health from your existing health router
-        basic_health = True  # You can call your existing health check here
+        # базовая проверка 
+        health_response = await health.health_check()
+        basic_health = health_response['status'] == 'healthy'
         
-        # Analytics database health
+        # Статус базы для аналитики
         db_healthy = check_database_health()
         
-        # Analytics task manager status
+        # Статур планировщика аналитики
         analytics_running = analytics_task_manager.running if analytics_task_manager else False
         
         status = "healthy"
@@ -472,7 +983,7 @@ async def get_metrics():
             return Response(content="\n".join(metrics), media_type="text/plain")
             
     except Exception as e:
-        # Return basic metrics if analytics is not available
+        # Вернуть базовые метрики если не доступно
         basic_metrics = [
             f"# HELP rag_chatbot_status API status",
             f"# TYPE rag_chatbot_status gauge",

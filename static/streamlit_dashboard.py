@@ -43,11 +43,11 @@ st.markdown("""
 st.sidebar.markdown('<div class="sidebar-header">🔧 Dashboard Settings</div>', unsafe_allow_html=True)
 
 # API URL input
-default_url = "http://127.0.0.1:8000"
+default_url = "http://0.0.0.0:8000"
 api_base_url = st.sidebar.text_input(
     "API Base URL", 
     value=default_url,
-    help="Enter the base URL of your API (e.g., http://127.0.0.1:8000)"
+    help="Enter the base URL of your API (e.g., http://0.0.0.0:8000)"
 )
 
 # Auto-refresh option

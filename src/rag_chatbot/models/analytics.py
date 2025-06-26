@@ -18,7 +18,7 @@ class Session(Base):
     user_agent = Column(String, nullable=True)
     ip_address = Column(String, nullable=True)
     
-    # Relationships
+    # Отношения
     conversations = relationship("Conversation", back_populates="session")
     analytics_events = relationship("AnalyticsEvent", back_populates="session")
 
@@ -32,30 +32,30 @@ class Conversation(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
     response_time_ms = Column(Float, nullable=True)
     
-    # RAG-specific fields
+    # Относящиеся к генерации 
     decision_type = Column(String, nullable=True)  # retrieve_document, search_knowledge_base, direct_answer
     success = Column(Boolean, default=True)
     total_cost = Column(Float, default=0.0)
     
-    # Document retrieval fields
+    # Относящиеся к выбору документа
     document_retrieved = Column(String, nullable=True)
     document_path = Column(String, nullable=True)
     match_score = Column(Float, nullable=True)
     match_type = Column(String, nullable=True)
     
-    # Knowledge base search fields
+    # Относящиеся к поиску по тексту 
     queries_generated = Column(JSON, nullable=True)
     num_documents_used = Column(Integer, nullable=True)
     
-    # Context fields
+    # Контекст чата
     chat_context_used = Column(Boolean, default=False)
     chat_context_length = Column(Integer, default=0)
     conversation_turn = Column(Integer, default=1)
     
-    # Rate limiting
+    # Ограничитель 
     rate_limit_hit = Column(Boolean, default=False)
     
-    # Relationships
+    # Отношения
     session = relationship("Session", back_populates="conversations")
 
 class AnalyticsEvent(Base):
@@ -67,7 +67,7 @@ class AnalyticsEvent(Base):
     event_data = Column(JSON, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
     
-    # Relationships
+    # Отношения
     session = relationship("Session", back_populates="analytics_events")
 
 class DocumentUsage(Base):
@@ -86,7 +86,7 @@ class QueryAnalytics(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     query_text = Column(Text, nullable=False)
-    query_hash = Column(String, nullable=False)  # Hash for duplicate detection
+    query_hash = Column(String, nullable=False)  # Хэш для поиска дупликатов
     frequency = Column(Integer, default=1)
     avg_response_time = Column(Float, nullable=True)
     success_rate = Column(Float, default=1.0)

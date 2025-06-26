@@ -2,8 +2,9 @@ from src.rag_chatbot.core.session_manager import SessionManager
 from src.rag_chatbot.core.rate_limiter import RateLimiter
 from src.rag_chatbot.core.rag_pipeline import RAGPipeline
 from src.rag_chatbot.config.settings import settings
+from src.rag_chatbot.tasks.analytics_tasks import AnalyticsTaskManager
 
-# Create shared instances
+# Создание объектов
 session_manager = SessionManager(
     session_timeout_minutes=settings.session_timeout_minutes,
     max_memory_length=settings.max_memory_length
@@ -15,3 +16,5 @@ rate_limiter = RateLimiter(
 )
 
 rag_pipeline = RAGPipeline()
+
+analytics_task_manager = AnalyticsTaskManager()

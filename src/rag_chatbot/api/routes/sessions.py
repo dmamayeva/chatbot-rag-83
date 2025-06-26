@@ -1,4 +1,5 @@
 # src/rag_chatbot/api/routes/sessions.py
+# Работа с сессией
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime
 from langchain.schema import HumanMessage, AIMessage
@@ -11,7 +12,7 @@ router = APIRouter()
 
 @router.post("/", response_model=SessionCreateResponse)
 async def create_session(credentials = Depends(get_api_key)):
-    """Create a new chat session"""
+    """Создание новой сессии"""
     session_id = session_manager.create_session()
     return SessionCreateResponse(
         session_id=session_id,
@@ -20,16 +21,15 @@ async def create_session(credentials = Depends(get_api_key)):
 
 @router.delete("/{session_id}")
 async def delete_session(session_id: str, credentials = Depends(get_api_key)):
-    """Delete a specific session"""
+    """Удаление сессии"""
     success = session_manager.delete_session(session_id)
     if not success:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"message": "Session deleted successfully"}
 
-# In src/rag_chatbot/api/routes/sessions.py - add this route:
 @router.get("/{session_id}/history")
 async def get_conversation_history(session_id: str, credentials = Depends(get_api_key)):
-    """Get conversation history for a session"""
+    """Получение истории разговора в сессии"""
     session = session_manager.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found or expired")
@@ -53,14 +53,13 @@ async def get_conversation_history(session_id: str, credentials = Depends(get_ap
 
 @router.get("/stats", response_model=SessionStatsResponse)
 async def get_session_stats(credentials = Depends(get_api_key)):
-    """Get session statistics"""
+    """Получение статистики"""
     stats = session_manager.get_session_stats()
     return SessionStatsResponse(**stats)
 
 @router.get("/{session_id}/rate-limit")
 async def get_rate_limit_stats(session_id: str, credentials = Depends(get_api_key)):
-    """Get rate limit statistics for a session"""
-    # Check if session exists
+    """Лимит для сессии"""
     session = session_manager.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found or expired")
